@@ -9,5 +9,32 @@
     {
       "name": "OriBreeze", "shortName": "OriBreeze", "description": "A portable bottle that enriches water with molecular hydrogen.", "features": ["Advanced SPE/PEM technology", "Portable and resistant design", "BPA-free", "No filters or maintenance"], "benefits": ["High concentration of hydrogen", "Rich in antioxidants", "Improves hydration and wellness"], "productPageUrl": "http://oribreeze.com/"
     }
+  ],
+  "generalKnowledge": [
+    {
+      "type": "application/pdf",
+      "name": "ad hook swipefile.pdf",
+      "path": "/uploads/ad hook swipefile.pdf"
+    },
+    {
+      "type": "application/pdf",
+      "name": "Cashvertising.pdf",
+      "path": "/uploads/Cashvertising.pdf"
+    },
+    {
+      "type": "application/pdf",
+      "name": "Clayton_Makepeace_-_Bullets_Lesson Screaming Eagle.pdf",
+      "path": "/uploads/Clayton_Makepeace_-_Bullets_Lesson Screaming Eagle.pdf"
+    },
+    {
+      "type": "application/pdf",
+      "name": "Framework Breakdown.pdf",
+      "path": "/uploads/Framework Breakdown.pdf"
+    },
+    {
+      "type": "application/pdf",
+      "name": "THT Doc (Shameless Snacks).pdf",
+      "path": "/uploads/THT Doc (Shameless Snacks).pdf"
+    }
   ]
 }

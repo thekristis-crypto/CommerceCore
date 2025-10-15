@@ -1,6 +1,7 @@
 export type AdType = 'video' | 'static';
 
-export type AppStatus = 'initializing' | 'idle' | 'compressing' | 'analyzing' | 'ready' | 'generating' | 'chatting' | 'summarizing';
+// Fix: Added 'parsing' to AppStatus to match its usage in App.tsx and prevent type errors.
+export type AppStatus = 'initializing' | 'idle' | 'compressing' | 'analyzing' | 'ready' | 'generating' | 'chatting' | 'summarizing' | 'parsing';
 
 export interface Product {
     name: string;
@@ -12,6 +13,18 @@ export interface Product {
     googleSheetUrl?: string;
     googleDocUrl?: string;
 }
+
+export interface GeneralKnowledgeFile {
+    type: string;
+    name: string;
+    path: string;
+}
+
+export interface KnowledgeBase {
+    products: Product[];
+    generalKnowledge?: GeneralKnowledgeFile[];
+}
+
 
 // --- New types for image iterations ---
 export interface ImageIteration {
