@@ -1,0 +1,5 @@
+{
+  "name": "Ad Iteration Generator",
+  "description": "An AI-powered application to generate creative A/B test ideas for video and static performance marketing ads. Upload your creative, define your angle, and get actionable suggestions to improve your ad hooks, visuals, and copy.",
+  "requestFramePermissions": []
+}

@@ -1,0 +1,55 @@
+{
+  "products": [
+    {
+      "name": "AliveBlue",
+      "shortName": "AliveBlue",
+      "description": "A portable bottle that enriches water with molecular hydrogen.",
+      "features": [
+        "Advanced SPE/PEM technology",
+        "Portable and resistant design",
+        "BPA-free",
+        "No filters or maintenance"
+      ],
+      "benefits": [
+        "High concentration of hydrogen",
+        "Rich in antioxidants",
+        "Improves hydration and wellness"
+      ],
+      "productPageUrl": "https://getaliveblue.com/"
+    },
+    {
+      "name": "CleanlixMold",
+      "shortName": "CleanlixMold",
+      "description": "A powerful, fast-acting mold and mildew remover.",
+      "features": [
+        "Fast-acting formula",
+        "No-scrub application",
+        "Prevents regrowth",
+        "Works on multiple surfaces"
+      ],
+      "benefits": [
+        "Effortlessly removes tough mold stains",
+        "Keeps surfaces clean and safe",
+        "Saves time and effort"
+      ],
+      "productPageUrl": ""
+    },
+    {
+      "name": "OriBreeze",
+      "shortName": "OriBreeze",
+      "description": "A portable bottle that enriches water with molecular hydrogen.",
+      "features": [
+        "Advanced SPE/PEM technology",
+        "Portable and resistant design",
+        "BPA-free",
+        "No filters or maintenance"
+      ],
+      "benefits": [
+        "High concentration of hydrogen",
+        "Rich in antioxidants",
+        "Improves hydration and wellness"
+      ],
+      "productPageUrl": "http://oribreeze.com/"
+    }
+  ]
+}
