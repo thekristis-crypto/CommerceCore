@@ -1,9 +1,12 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { GoogleGenAI, Type, Modality } from '@google/genai';
-import * as pdfjs from 'pdfjs-dist';
-import type { AdType, ChatMessage, AppStatus, Product, FilenameAnalysis, AnalysisSource, ImageIteration, IterationType, TimeRange, GeneralKnowledgeFile, KnowledgeBase } from './types';
+import { Chat } from '@google/genai';
+import type { AdType, ChatMessage, AppStatus, Product, FilenameAnalysis, GeneralKnowledgeFile, ImageIteration } from './types';
 import type { Selection } from './components/StaticAdInputs';
+import { useAdState } from './hooks/useAdState';
+import { useKnowledgeBase } from './hooks/useKnowledgeBase';
+import { useGemini } from './hooks/useGemini';
+
 import AdSelector from './components/AdSelector';
 import FileUpload from './components/FileUpload';
 import ReferenceImageUpload from './components/ReferenceImageUpload';
@@ -16,358 +19,323 @@ import AnalysisSummary from './components/AnalysisSummary';
 import TranscriptionModal from './components/TranscriptionModal';
 import StaticAdEditor from './components/StaticAdInputs';
 import PresetPrompts from './components/PresetPrompts';
-import KnowledgeBaseManager from './components/KnowledgeBaseIndicator';
-
-pdfjs.GlobalWorkerOptions.workerSrc = 'https://aistudiocdn.com/pdfjs-dist@^5.4.149/build/pdf.worker.mjs';
-
-const MAX_VIDEO_SIZE_MB = 20;
-const BACKEND_URL = 'https://ad-iteration-backend.onrender.com';
-
-const FILENAME_REGEX = new RegExp(
-  '^(?<productName>[a-zA-Z0-9]+)_' +
-  '(?<platform>[A-Z]{2,})_' +
-  '(?<locale>[A-Z]{2,})_' +
-  '(?<batchNumber>\\d+)_' +
-  '(?<adVersion>\\d+)_' +
-  '(?:(?<orig>orig)_(?:(?<origLocale>[A-Z]{2,})_)?(?<origBatchNumber>\\d+)_' +
-  '(?<origAdVersion>\\d+)_)?' +
-  '(?<adType>[A-Z]{3,})_' +
-  '(?<adFormat>[\\dx]+)_' +
-  '(?<angle>[a-zA-Z0-9_]+)_' +
-  '(?<pcInitials>[A-Z]{2})_' +
-  '(?<veInitials>[A-Z]{2})' +
-  '\\..*$',
-  'i' // Make the regex case-insensitive
-);
-
-const parseFilename = (filename: string): FilenameAnalysis | null => {
-    const match = filename.match(FILENAME_REGEX);
-    if (!match?.groups) return null;
-
-    const { groups } = match;
-    const data: FilenameAnalysis = {};
-    let validParts = 0;
-
-    if (groups.productName) { data.productName = groups.productName; validParts++; }
-    if (groups.platform) { data.platform = groups.platform.toUpperCase(); validParts++; }
-    if (groups.locale) { data.locale = groups.locale.toUpperCase(); validParts++; }
-    if (groups.batchNumber && groups.adVersion) { 
-        data.batchAndVersion = `Batch ${groups.batchNumber}, V${groups.adVersion}`; 
-        validParts += 2; 
-    }
-    if (groups.orig && groups.origBatchNumber && groups.origAdVersion) { 
-        let origInfo = `orig_`;
-        if (groups.origLocale) {
-            origInfo += `${groups.origLocale.toUpperCase()}_`;
-        }
-        origInfo += `${groups.origBatchNumber}_${groups.origAdVersion}`;
-        data.originalBatchInfo = origInfo; 
-    }
-    if (groups.adType) { data.adType = groups.adType.toUpperCase(); validParts++; }
-    if (groups.adFormat) { data.adFormat = groups.adFormat; validParts++; }
-    if (groups.angle) { 
-        data.angle = groups.angle.replace(/_/g, ', '); 
-        validParts++; 
-    }
-    if (groups.pcInitials) { data.pcInitials = groups.pcInitials.toUpperCase(); validParts++; }
-    if (groups.veInitials) { data.veInitials = groups.veInitials.toUpperCase(); validParts++; }
-    
-    // Total mandatory parts are 10. 50% is 5.
-    return validParts >= 5 ? data : null;
-};
-
-const fileToDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = error => reject(error);
-});
-
-const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve((reader.result as string).split(',')[1]);
-    reader.onerror = error => reject(error);
-});
-
-const compressVideo = (file: File, onProgress: (progress: number) => void): Promise<File> => {
-    // This function can remain as is, assuming it works correctly.
-    // To keep the response concise, its implementation is omitted here.
-    // A placeholder is returned to satisfy the type checker.
-    return new Promise((resolve) => resolve(file));
-};
-
-
-const extractFrameAsDataUrl = (videoFile: File, time: number): Promise<string> => {
-    return new Promise((resolve, reject) => {
-        const video = document.createElement('video');
-        video.preload = 'metadata';
-        video.src = URL.createObjectURL(videoFile);
-        video.muted = true;
-
-        video.onloadedmetadata = () => {
-            video.currentTime = time;
-        };
-
-        video.onseeked = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) {
-                URL.revokeObjectURL(video.src);
-                return reject(new Error('Could not get canvas context.'));
-            }
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const dataUrl = canvas.toDataURL('image/jpeg');
-            URL.revokeObjectURL(video.src);
-            resolve(dataUrl);
-        };
-
-        video.onerror = (e) => {
-            URL.revokeObjectURL(video.src);
-            reject(new Error('Failed to load video for frame extraction.'));
-        };
-    });
-};
-
-const extractFramesAsDataUrls = (videoFile: File, times: number[]): Promise<string[]> => {
-    return new Promise((resolve, reject) => {
-        const video = document.createElement('video');
-        video.preload = 'metadata';
-        video.src = URL.createObjectURL(videoFile);
-        video.muted = true;
-        const frames: string[] = [];
-        let timeIndex = 0;
-
-        video.onloadedmetadata = () => {
-            if (video.duration && isFinite(video.duration)) {
-                 video.currentTime = Math.min(times[timeIndex], video.duration);
-            } else {
-                 reject(new Error('Video duration is not available.'));
-            }
-        };
-
-        video.onseeked = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) {
-                 URL.revokeObjectURL(video.src);
-                return reject(new Error('Could not get canvas context.'));
-            }
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            frames.push(canvas.toDataURL('image/jpeg'));
-
-            timeIndex++;
-            if (timeIndex < times.length) {
-                video.currentTime = Math.min(times[timeIndex], video.duration);
-            } else {
-                URL.revokeObjectURL(video.src);
-                resolve(frames);
-            }
-        };
-
-        video.onerror = (e) => {
-            URL.revokeObjectURL(video.src);
-            reject(new Error('Failed to load video for multi-frame extraction.'));
-        };
-    });
-};
+import KnowledgeBaseModal from './components/KnowledgeBaseModal';
 
 const App: React.FC = () => {
-    // App State
-    const [status, setStatus] = useState<AppStatus>('initializing');
-    const [error, setError] = useState<string | null>(null);
-    
-    // Knowledge State
-    const [productList, setProductList] = useState<Product[]>([]);
-    const [persistedKnowledgeFiles, setPersistedKnowledgeFiles] = useState<GeneralKnowledgeFile[]>([]);
-    const [knowledgeBaseContent, setKnowledgeBaseContent] = useState<string | null>(null);
-    const [isParsingKnowledge, setIsParsingKnowledge] = useState(false);
+    const {
+        status, setStatus, error, setError,
+        adType, setAdType, adFile, setAdFile, filePreview, setFilePreview,
+        marketingAngle, setMarketingAngle, iterationRequest, setIterationRequest,
+        negativePrompt, setNegativePrompt, selectedProduct, setSelectedProduct,
+        customProductName, setCustomProductName,
+        analysisResults, setAnalysisResults, analysisSource, setAnalysisSource,
+        detectedProduct, setDetectedProduct, suggestedAngle, setSuggestedAngle,
+        suggestedAngleFromAI, setSuggestedAngleFromAI,
+        detectedLanguage, setDetectedLanguage, transcription, setTranscription,
+        showTranscriptionModal, setShowTranscriptionModal, isTranscribing, setIsTranscribing,
+        selection, setSelection, workingAdPreview, setWorkingAdPreview,
+        selectedIteration, setSelectedIteration, referenceAdFile, setReferenceAdFile,
+        referenceFilePreview, setReferenceFilePreview, numberOfIterations, setNumberOfIterations,
+        iterationType, setIterationType, selectedText, setSelectedText,
+        selectedTimeRange, setSelectedTimeRange, selectedTextTranslation, setSelectedTextTranslation,
+        isTranslatingSelection, setIsTranslatingSelection,
+        resetState
+    } = useAdState();
 
-    // Form & UI State
-    const [adType, setAdType] = useState<AdType | null>(null);
-    const [adFile, setAdFile] = useState<File | null>(null);
-    const [filePreview, setFilePreview] = useState<string | null>(null); // Original uploaded file preview
-    const [marketingAngle, setMarketingAngle] = useState('');
-    const [iterationRequest, setIterationRequest] = useState('');
-    const [negativePrompt, setNegativePrompt] = useState('');
-    const [selectedProduct, setSelectedProduct] = useState<string>('');
-    const [customProductName, setCustomProductName] = useState('');
-    const [compressionProgress, setCompressionProgress] = useState(0);
+    const {
+        productList,
+        persistedKnowledgeFiles,
+        isParsingKnowledge,
+        knowledgeBaseContent,
+        showKnowledgeModal,
+        setShowKnowledgeModal,
+        error: knowledgeBaseError,
+    } = useKnowledgeBase();
+
     const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-    const [chatInput, setChatInput] = useState('');
-    const chatEndRef = useRef<HTMLDivElement>(null);
+
+    const {
+        chatSession,
+        setChatSession,
+        currentChatMessage,
+        setCurrentChatMessage,
+        handleStartGeneration,
+        handleFollowUpMessage
+    } = useGemini({
+        adFile, adType, marketingAngle, iterationRequest, negativePrompt, selectedProduct, customProductName,
+        selection, referenceAdFile, numberOfIterations, iterationType, selectedText, selectedTextTranslation,
+        transcription, detectedLanguage, knowledgeBaseContent, productList,
+        setStatus, setError, setChatHistory
+    });
+
     const resultsContainerRef = useRef<HTMLDivElement>(null);
     
-    // Analysis State
-    const [analysisResults, setAnalysisResults] = useState<FilenameAnalysis | null>(null);
-    const [analysisSource, setAnalysisSource] = useState<AnalysisSource>(null);
-    const [brandConfirmation, setBrandConfirmation] = useState<{ generic: string, brand: string } | null>(null);
-    const [productConfirmationStep, setProductConfirmationStep] = useState(false);
-    const [detectedProduct, setDetectedProduct] = useState<string | null>(null);
-    const [suggestedAngle, setSuggestedAngle] = useState('');
-    const [suggestedAngleFromAI, setSuggestedAngleFromAI] = useState<string | null>(null);
-    const [needsAngleSuggestion, setNeedsAngleSuggestion] = useState(false);
-
-
-    // Feature State
-    const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
-    const [transcription, setTranscription] = useState<string | null>(null);
-    const [showTranscriptionModal, setShowTranscriptionModal] = useState(false);
-    const [isTranscribing, setIsTranscribing] = useState(false);
-    const [selection, setSelection] = useState<Selection | null>(null);
-    const [workingAdPreview, setWorkingAdPreview] = useState<string | null>(null); // Current ad being edited
-    const [selectedIteration, setSelectedIteration] = useState<ImageIteration | null>(null);
-    const [referenceAdFile, setReferenceAdFile] = useState<File | null>(null);
-    const [referenceFilePreview, setReferenceFilePreview] = useState<string | null>(null);
-    const [numberOfIterations, setNumberOfIterations] = useState<1 | 2 | 4>(4);
-    // Video Iteration State
-    const [iterationType, setIterationType] = useState<IterationType | null>(null);
-    const [selectedText, setSelectedText] = useState<string | null>(null);
-    const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange | null>(null);
-    const [selectedTextTranslation, setSelectedTextTranslation] = useState<string | null>(null);
-    const [isTranslatingSelection, setIsTranslatingSelection] = useState(false);
-
-
-    const fetchKnowledgeBase = useCallback(async () => {
-        setIsParsingKnowledge(true);
-        setError(null);
-        try {
-            const response = await fetch(`${BACKEND_URL}/api/knowledge`);
-            if (!response.ok) {
-                throw new Error(`Network response was not ok: ${response.statusText}`);
-            }
-            const data: KnowledgeBase = await response.json();
-            
-            if (data.products && data.products.length > 0) {
-                setProductList(data.products);
-            } else {
-                throw new Error("No products found in the knowledge base.");
-            }
-
-            if (data.generalKnowledge && data.generalKnowledge.length > 0) {
-                setPersistedKnowledgeFiles(data.generalKnowledge);
-                let combinedContent = '';
-
-                for (const file of data.generalKnowledge) {
-                    const fileResponse = await fetch(`${BACKEND_URL}${file.path}`);
-                    const fileBlob = await fileResponse.blob();
-                    
-                    if (file.type === 'application/pdf') {
-                        const arrayBuffer = await fileBlob.arrayBuffer();
-                        const typedarray = new Uint8Array(arrayBuffer);
-                        const pdf = await pdfjs.getDocument(typedarray).promise;
-                        for (let i = 1; i <= pdf.numPages; i++) {
-                            const page = await pdf.getPage(i);
-                            const textContentPage = await page.getTextContent();
-                            combinedContent += textContentPage.items.map(item => 'str' in item ? item.str : '').join(' ');
-                            combinedContent += '\n\n';
-                        }
-                    } else if (file.type === 'text/plain') {
-                        combinedContent += await fileBlob.text();
-                        combinedContent += '\n\n';
-                    }
-                }
-                setKnowledgeBaseContent(combinedContent.trim());
-            } else {
-                 setPersistedKnowledgeFiles([]);
-                 setKnowledgeBaseContent(null);
-            }
-             setStatus('idle');
-        } catch (e) {
-            console.error("Failed to fetch knowledge base:", e);
-            setError("Could not load the knowledge base from the server. Please ensure the backend is running and accessible.");
-            setStatus('idle');
-        } finally {
-            setIsParsingKnowledge(false);
-        }
-    }, []);
-
+    // Auto-scroll chat
     useEffect(() => {
-        fetchKnowledgeBase();
-    }, [fetchKnowledgeBase]);
-
-
-    const resetState = (keepAdType = false) => {
-        setAdFile(null);
-        setFilePreview(null);
-        setChatHistory([]);
-        setError(null);
-        setMarketingAngle('');
-        setIterationRequest('');
-        setNegativePrompt('');
-        setSelectedProduct('');
-        setCustomProductName('');
-        setCompressionProgress(0);
-        setChatInput('');
-        setStatus(productList.length > 0 ? 'idle' : 'initializing');
-        setAnalysisResults(null);
-        setAnalysisSource(null);
-        setBrandConfirmation(null);
-        setProductConfirmationStep(false);
-        setDetectedProduct(null);
-        setSuggestedAngle('');
-        setSuggestedAngleFromAI(null);
-        setNeedsAngleSuggestion(false);
-        setDetectedLanguage(null);
-        setTranscription(null);
-        setShowTranscriptionModal(false);
-        setIsTranscribing(false);
-        setSelection(null);
-        setWorkingAdPreview(null);
-        setSelectedIteration(null);
-        setReferenceAdFile(null);
-        setReferenceFilePreview(null);
-        setNumberOfIterations(4);
-        setIterationType(null);
-        setSelectedText(null);
-        setSelectedTimeRange(null);
-        setSelectedTextTranslation(null);
-        setIsTranslatingSelection(false);
-        if (!keepAdType) {
-             setAdType(null);
+        if (chatHistory.length > 0) {
+            resultsContainerRef.current?.scrollTo({
+                top: resultsContainerRef.current.scrollHeight,
+                behavior: 'smooth'
+            });
         }
-    }
+    }, [chatHistory]);
 
-    const transcribeVideo = useCallback(async (videoFile: File): Promise<string> => {
-        try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-            const videoBase64 = await fileToBase64(videoFile);
-            const videoPart = { inlineData: { mimeType: videoFile.type, data: videoBase64 } };
-            const transcriptionPrompt = `Transcribe ONLY the spoken voiceover audio from this video. Do not describe on-screen text or actions. If there is no spoken audio, return "No spoken audio detected.". If the original language is not English, provide an English translation below the transcription in the format:\n---\nENGLISH TRANSLATION:\n[translation here]`;
-            const transcriptionSystemInstruction = "You are a highly accurate AI transcription service. Your only task is to transcribe spoken audio from a video file.";
-            const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: { parts: [videoPart, { text: transcriptionPrompt }] }, config: { systemInstruction: transcriptionSystemInstruction } });
-            return response.text;
-        } catch (e) {
-            console.error("Transcription generation failed:", e);
-            return "Could not generate transcription due to an error.";
+    // Translate selected text
+    useEffect(() => {
+        if (!selectedText || (detectedLanguage && detectedLanguage.toLowerCase().startsWith('en'))) {
+            setSelectedTextTranslation(null);
+            return;
         }
-    }, []);
 
-    const isValidAngle = (angle: string | undefined): boolean => {
-        if (!angle) return false;
-        // A very simple check: not a jumble of letters, has some separation or vowels.
-        // This avoids things like "BestVar" but allows "FOMO" or "Problem, Solution".
-        const cleaned = angle.replace(/[^a-zA-Z]/g, '');
-        if (cleaned.length < 3) return true; // Short angles like "BOGO" are fine.
-        if (!/[aeiou]/i.test(cleaned)) return false; // No vowels suggests gibberish
-        if (cleaned.toLowerCase() === 'bestvar') return false; // Explicitly block common placeholders
-        return true;
+        const controller = new AbortController();
+        const signal = controller.signal;
+
+        useGemini.translateText(selectedText, signal)
+            .then(translation => {
+                if (!signal.aborted) {
+                    setSelectedTextTranslation(translation);
+                }
+            })
+            .catch(err => {
+                if (!signal.aborted) {
+                    console.error("Translation failed:", err);
+                    setSelectedTextTranslation("Could not translate selection.");
+                }
+            })
+            .finally(() => {
+                if (!signal.aborted) {
+                    setIsTranslatingSelection(false);
+                }
+            });
+
+        setIsTranslatingSelection(true);
+
+        return () => controller.abort();
+
+    }, [selectedText, detectedLanguage, setSelectedTextTranslation, setIsTranslatingSelection]);
+
+
+    const handleFileChange = async (file: File) => {
+        resetState(true);
+        setAdFile(file);
+        useAdState.processFile(file, adType, (url) => {
+            setFilePreview(url);
+            setWorkingAdPreview(url);
+        }, setStatus, setError);
+
+        const { analysis, product, angle } = useAdState.analyzeFile(file, productList);
+        if (analysis) {
+            setAnalysisResults(analysis);
+            setAnalysisSource('filename');
+            if (product) {
+                setSelectedProduct(product.name);
+                setDetectedProduct(product.name);
+            }
+            if (angle) {
+                setMarketingAngle(angle);
+                setSuggestedAngle(angle);
+            } else {
+                useGemini.suggestAngle(file, adType as AdType, setStatus).then(setSuggestedAngleFromAI);
+            }
+        } else {
+            useGemini.suggestAngle(file, adType as AdType, setStatus).then(setSuggestedAngleFromAI);
+        }
+
+        if (adType === 'video' && !transcription && !isTranscribing) {
+            setIsTranscribing(true);
+            useGemini.transcribeVideo(file).then(text => {
+                setTranscription(text);
+                const langMatch = text.match(/LANGUAGE: (.*)/);
+                if (langMatch && langMatch[1]) {
+                    setDetectedLanguage(langMatch[1]);
+                }
+            }).finally(() => setIsTranscribing(false));
+        }
     };
 
-    const getAngleSuggestionFromAI = async (file: File, adType: AdType) => {
-        setSuggestedAngleFromAI(null);
-        try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-            let creativeParts: any[];
-            if (adType === 'video') {
-                const frame = await extractFrameAsDataUrl(file, 2.0);
-                creativeParts = [{ inlineData: { mimeType: 'image/jpeg', data: frame.split(',')[1] } }];
-            } else {
-                const base64 = await fileToBase64(file);
-                creativeParts = [{ inlineData: { mimeType: file.type, data: base64 } }];
-            }
-            const prompt = "Analyze the attached ad creative and suggest a concise
+    const handleReferenceFileChange = (file: File) => {
+        setReferenceAdFile(file);
+        useAdState.processFile(file, 'static', setReferenceFilePreview, setStatus, setError);
+    };
+
+    const handleSelectIteration = (iteration: ImageIteration) => {
+        if (iteration.imageDataUrl) {
+            setSelectedIteration(iteration);
+            setWorkingAdPreview(iteration.imageDataUrl);
+            fetch(iteration.imageDataUrl)
+                .then(res => res.blob())
+                .then(blob => {
+                    const newFile = new File([blob], `iteration-${iteration.id}.png`, { type: 'image/png' });
+                    setAdFile(newFile);
+                });
+            setSelection(null);
+        }
+    };
+
+    if (!adType) {
+        return (
+             <div className="bg-slate-950 text-slate-200 font-sans min-h-screen flex flex-col items-center justify-center p-4">
+                <header className="w-full max-w-screen-2xl text-center py-6 mb-8">
+                    <h1 className="text-3xl font-bold">AI Ad Iteration Studio</h1>
+                    <p className="text-slate-400 mt-2">Upload your creative, define your goal, and instantly generate A/B test ideas.</p>
+                </header>
+                <AdSelector onSelect={type => { resetState(); setAdType(type); }} onOpenKnowledgeBase={() => setShowKnowledgeModal(true)} />
+                {knowledgeBaseError && <p className="mt-4 text-red-400 max-w-md text-center text-sm">{knowledgeBaseError}</p>}
+                <KnowledgeBaseModal
+                    isOpen={showKnowledgeModal}
+                    onClose={() => setShowKnowledgeModal(false)}
+                    persistedFiles={persistedKnowledgeFiles}
+                    isLoading={isParsingKnowledge}
+                />
+             </div>
+        )
+    }
+
+    return (
+        <div className="bg-slate-950 text-slate-200 font-sans min-h-screen flex flex-col items-center">
+            <header className="w-full max-w-screen-2xl text-center py-6">
+                <h1 className="text-3xl font-bold">AI Ad Iteration Studio</h1>
+                <p className="text-slate-400 mt-2">Upload your creative, define your goal, and instantly generate A/B test ideas.</p>
+            </header>
+
+            <div className="w-full max-w-screen-2xl flex-grow flex gap-8 px-4 pb-8">
+                <aside className="w-[450px] flex-shrink-0 bg-slate-900 border border-slate-800 rounded-lg flex flex-col">
+                    <div className="flex justify-between items-center p-4 border-b border-slate-800 flex-shrink-0">
+                        <h2 className="text-lg font-bold">Controls</h2>
+                        <button onClick={() => resetState()} className="text-sm bg-slate-700/50 hover:bg-slate-700 px-3 py-1 rounded-md transition-colors">
+                            New Project
+                        </button>
+                    </div>
+
+                    <div className="flex-grow p-4 space-y-6 overflow-y-auto">
+                        <section className="space-y-4">
+                            <h3 className="font-semibold text-lg">1. Your Creative</h3>
+                            {filePreview ? (
+                                <div className="space-y-4">
+                                    {adType === 'static' && workingAdPreview && (
+                                        <StaticAdEditor imageUrl={workingAdPreview} onSelectionChange={setSelection} disabled={status === 'generating'} />
+                                    )}
+                                    {adType === 'video' && !iterationType && (
+                                        <IterationTargetSelector onSelect={setIterationType} videoUrl={filePreview} />
+                                    )}
+                                    {adType === 'video' && iterationType === 'copy' && (
+                                        <VideoTextSelector videoUrl={filePreview} transcription={transcription} isTranscribing={isTranscribing} selectedText={selectedText} onTextSelect={setSelectedText} onBack={() => { setIterationType(null); setSelectedText(null); setSelectedTextTranslation(null); }} translation={selectedTextTranslation} isTranslating={isTranslatingSelection} />
+                                    )}
+                                    {adType === 'video' && iterationType === 'visual' && (
+                                        <VideoTimelineSelector videoUrl={filePreview} selectedTimeRange={selectedTimeRange} onTimeRangeSelect={setSelectedTimeRange} onBack={() => { setIterationType(null); setSelectedTimeRange(null); }} />
+                                    )}
+                                    <button onClick={() => { setAdFile(null); setFilePreview(null); resetState(true); }} className="w-full text-xs py-1 px-3 rounded-md bg-slate-700/50 hover:bg-slate-700">Change Creative</button>
+                                    { adType === 'video' && adFile && (
+                                        <button onClick={() => setShowTranscriptionModal(true)} disabled={isTranscribing || !transcription} className="w-full text-center py-2 px-4 rounded-md bg-cyan-600/20 text-cyan-300 hover:bg-cyan-600/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                                            {isTranscribing ? <Spinner /> : null}
+                                            {isTranscribing ? 'Transcribing...' : (transcription ? 'Show Full Transcription' : 'Transcription Unavailable')}
+                                        </button>
+                                    )}
+                                </div>
+                            ) : (
+                                <FileUpload onFileChange={handleFileChange} adType={adType} disabled={status === 'compressing'} />
+                            )}
+                        </section>
+                        
+                        {adFile && (
+                            <>
+                                <section className="space-y-4">
+                                    <h3 className="font-semibold text-lg">2. Your Goal</h3>
+                                    {analysisResults && <AnalysisSummary source={analysisSource} data={analysisResults} detectedLanguage={detectedLanguage} />}
+                                     <div>
+                                        <label htmlFor="product" className="block text-sm font-medium text-slate-300 mb-1">Product</label>
+                                        <select id="product" value={selectedProduct} onChange={e => setSelectedProduct(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-md p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+                                            <option value="">{detectedProduct ? `Detected: ${detectedProduct}`: `Select a product...`}</option>
+                                            {productList.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                                            <option value="Other">Other...</option>
+                                        </select>
+                                    </div>
+                                    {selectedProduct === 'Other' && (
+                                        <input type="text" value={customProductName} onChange={e => setCustomProductName(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-md p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="Enter Custom Product Name" />
+                                    )}
+                                    <div>
+                                        <label htmlFor="angle" className="block text-sm font-medium text-slate-300 mb-1">Marketing Angle</label>
+                                        <div className="relative">
+                                            <input type="text" id="angle" value={marketingAngle} onChange={e => setMarketingAngle(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-md p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder={suggestedAngle ? `e.g., ${suggestedAngle}`: "e.g., Problem/Solution, UGC"} />
+                                            {suggestedAngleFromAI && marketingAngle !== suggestedAngleFromAI && (
+                                                <button onClick={() => setMarketingAngle(suggestedAngleFromAI)} className="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-indigo-600/50 hover:bg-indigo-600 px-2 py-1 rounded">
+                                                    Use: {suggestedAngleFromAI}
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                     <div>
+                                        <label htmlFor="negativePrompt" className="block text-sm font-medium text-slate-300 mb-1">Things to Avoid (Optional)</label>
+                                        <input type="text" id="negativePrompt" value={negativePrompt} onChange={e => setNegativePrompt(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-md p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="e.g., no red colors, don't use stock photos" />
+                                    </div>
+                                    {adType === 'static' && (
+                                        <div className="space-y-4 pt-2">
+                                            <ReferenceImageUpload onFileChange={handleReferenceFileChange} onClear={() => { setReferenceAdFile(null); setReferenceFilePreview(null); }} previewUrl={referenceFilePreview} disabled={status === 'generating'} />
+                                            <div>
+                                                <label htmlFor="numIterations" className="block text-sm font-medium text-slate-300 mb-1">Number of Variations</label>
+                                                 <select id="numIterations" value={numberOfIterations} onChange={e => setNumberOfIterations(Number(e.target.value) as 1 | 2 | 4)} className="w-full bg-slate-800 border border-slate-600 rounded-md p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+                                                    <option value="1">1 Variation</option>
+                                                    <option value="2">2 Variations</option>
+                                                    <option value="4">4 Variations</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div>
+                                        <label htmlFor="iterationRequest" className="block text-sm font-medium text-slate-300 mb-1">Iteration Request</label>
+                                        <textarea id="iterationRequest" value={iterationRequest} onChange={(e) => setIterationRequest(e.target.value)} placeholder='e.g., "Generate 5 alternative hooks for this copy"' className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition resize-none" rows={4} disabled={status === 'generating'} />
+                                    </div>
+                                    <PresetPrompts adType={adType} hasSelection={!!selection} onSelect={(prompt) => setIterationRequest(prompt)} iterationType={iterationType} />
+                                </section>
+                            </>
+                        )}
+                    </div>
+                    
+                    <div className="p-4 border-t border-slate-800 flex-shrink-0">
+                        <button onClick={() => handleStartGeneration(chatSession, setChatSession)} disabled={!adFile || !selectedProduct || !marketingAngle || !iterationRequest || status === 'generating'} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition-colors disabled:bg-slate-600 disabled:cursor-not-allowed flex items-center justify-center">
+                            {status === 'generating' ? <Spinner /> : 'Generate'}
+                        </button>
+                    </div>
+                </aside>
+
+                <section className="flex-grow bg-slate-900 border border-slate-800 rounded-lg flex flex-col">
+                     {error && <div className="m-4 bg-red-900/50 border border-red-700 text-red-300 p-4 rounded-lg flex-shrink-0">{error}</div>}
+                    
+                    {chatHistory.length === 0 ? (
+                        <div className="flex-grow flex flex-col items-center justify-center text-center text-slate-500 p-8">
+                             <svg className="w-16 h-16 mb-4 text-slate-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 01-6.23-.693L4.2 15.3m15.6 0c1.626.408 3.11 1.465 3.976 2.88A9.065 9.065 0 0112 21a9.065 9.065 0 01-7.775-4.144c.866-1.415 2.35-2.472 3.976-2.88" />
+                            </svg>
+                            <h3 className="text-xl font-semibold mt-4 text-slate-400">Your results will appear here</h3>
+                            <p className="max-w-xs mt-2">Upload an ad and define your goal in the sidebar to get started.</p>
+                        </div>
+                    ) : (
+                        <div ref={resultsContainerRef} className="flex-grow p-6 overflow-y-auto">
+                            <ResultsDisplay chatHistory={chatHistory} status={status} adType={adType} selectedIteration={selectedIteration} onSelectIteration={handleSelectIteration} />
+                        </div>
+                    )}
+                    
+                    {chatHistory.length > 0 && chatSession && (
+                        <div className="p-4 border-t border-slate-800 flex-shrink-0">
+                            <form onSubmit={(e) => handleFollowUpMessage(e, chatSession)} className="flex items-center gap-3">
+                                <input type="text" value={currentChatMessage} onChange={(e) => setCurrentChatMessage(e.target.value)} placeholder="Ask a follow-up question to refine the ideas..." className="w-full bg-slate-800 border border-slate-600 rounded-lg py-2 px-4 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition disabled:opacity-50" disabled={status === 'generating'} aria-label="Chat input" />
+                                <button type="submit" disabled={status === 'generating' || !currentChatMessage.trim()} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold p-2.5 rounded-lg transition-colors disabled:bg-slate-600 disabled:cursor-not-allowed flex-shrink-0" aria-label="Send message">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.428A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" /></svg>
+                                </button>
+                            </form>
+                        </div>
+                    )}
+                </section>
+            </div>
+            <footer className="w-full text-center p-4 text-xs text-slate-600">
+                Powered by Google Gemini
+            </footer>
+             {showTranscriptionModal && transcription && (
+                <TranscriptionModal isOpen={showTranscriptionModal} onClose={() => setShowTranscriptionModal(false)} transcription={transcription} detectedLanguage={detectedLanguage} />
+            )}
+             <KnowledgeBaseModal isOpen={showKnowledgeModal} onClose={() => setShowKnowledgeModal(false)} persistedFiles={persistedKnowledgeFiles} isLoading={isParsingKnowledge} />
+        </div>
+    );
+};
+
+export default App;

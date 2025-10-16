@@ -31,7 +31,7 @@ const OptionCard: React.FC<{
 const IterationTargetSelector: React.FC<IterationTargetSelectorProps> = ({ onSelect, videoUrl }) => {
     return (
         <div className="space-y-4">
-             <video key={videoUrl} src={videoUrl} controls className="w-full rounded-lg shadow-lg" playsInline />
+             <video key={videoUrl} src={videoUrl} controls muted className="w-full rounded-lg shadow-lg" playsInline />
             <div className="space-y-3 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
                 <h3 className="text-md font-semibold text-center text-slate-300">What do you want to iterate on?</h3>
                 <div className="flex flex-col gap-3">
@@ -51,7 +51,7 @@ const IterationTargetSelector: React.FC<IterationTargetSelectorProps> = ({ onSel
                         description="Select a time range to get new visual ideas."
                         icon={
                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
                             </svg>
                         }
                     />
