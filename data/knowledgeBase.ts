@@ -3,7 +3,14 @@ import type { KnowledgeBase } from '../types';
 export const knowledgeBaseData: KnowledgeBase = {
   "products": [
     {
-      "name": "AliveBlue", "shortName": "AliveBlue", "description": "A portable bottle that enriches water with molecular hydrogen.", "features": ["Advanced SPE/PEM technology", "Portable and resistant design", "BPA-free", "No filters or maintenance"], "benefits": ["High concentration of hydrogen", "Rich in antioxidants", "Improves hydration and wellness"], "productPageUrl": "https://getaliveblue.com/"
+      "name": "AliveBlue", "shortName": "AliveBlue", "description": "A portable bottle that enriches water with molecular hydrogen.", "features": ["Advanced SPE/PEM technology", "Portable and resistant design", "BPA-free", "No filters or maintenance"], "benefits": ["High concentration of hydrogen", "Rich in antioxidants", "Improves hydration and wellness"], "productPageUrl": "https://getaliveblue.com/",
+      "knowledgeFiles": [
+        {
+           "type": "application/pdf",
+           "name": "THT Doc (Shameless Snacks).pdf",
+           "path": "https://firebasestorage.googleapis.com/v0/b/my-project-6b8f0.firebasestorage.app/o/THT%20Doc%20(Shameless%20Snacks).pdf?alt=media&token=b3982112-8046-4687-8fd4-fef3f5896366"
+        }
+      ]
     },
     {
       "name": "CleanlixMold", "shortName": "CleanlixMold", "description": "A powerful, fast-acting mold and mildew remover.", "features": ["Fast-acting formula", "No-scrub application", "Prevents regrowth", "Works on multiple surfaces"], "benefits": ["Effortlessly removes tough mold stains", "Keeps surfaces clean and safe", "Saves time and effort"], "productPageUrl": ""
@@ -32,11 +39,6 @@ export const knowledgeBaseData: KnowledgeBase = {
       "type": "application/pdf",
       "name": "Framework Breakdown.pdf",
       "path": "https://firebasestorage.googleapis.com/v0/b/my-project-6b8f0.firebasestorage.app/o/Framework%20Breakdown.pdf?alt=media&token=cb965807-be01-4367-b99d-ff304a7a18d7"
-    },
-    {
-      "type": "application/pdf",
-      "name": "THT Doc (Shameless Snacks).pdf",
-      "path": "https://firebasestorage.googleapis.com/v0/b/my-project-6b8f0.firebasestorage.app/o/THT%20Doc%20(Shameless%20Snacks).pdf?alt=media&token=b3982112-8046-4687-8fd4-fef3f5896366"
     }
   ]
 };

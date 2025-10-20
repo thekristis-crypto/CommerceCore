@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Chat } from '@google/genai';
 import type { AdType, ChatMessage, AppStatus, Product, FilenameAnalysis, GeneralKnowledgeFile, ImageIteration } from './types';
@@ -44,9 +43,9 @@ const App: React.FC = () => {
 
     const {
         productList,
-        persistedKnowledgeFiles,
+        generalKnowledgeFiles,
+        knowledgeFileContents,
         isParsingKnowledge,
-        knowledgeBaseContent,
         showKnowledgeModal,
         setShowKnowledgeModal,
         error: knowledgeBaseError,
@@ -64,7 +63,7 @@ const App: React.FC = () => {
     } = useGemini({
         adFile, adType, marketingAngle, iterationRequest, negativePrompt, selectedProduct, customProductName,
         selection, referenceAdFile, numberOfIterations, iterationType, selectedText, selectedTextTranslation,
-        transcription, detectedLanguage, knowledgeBaseContent, productList,
+        transcription, detectedLanguage, productList, generalKnowledgeFiles, knowledgeFileContents,
         setStatus, setError, setChatHistory
     });
 
@@ -184,7 +183,8 @@ const App: React.FC = () => {
                 <KnowledgeBaseModal
                     isOpen={showKnowledgeModal}
                     onClose={() => setShowKnowledgeModal(false)}
-                    persistedFiles={persistedKnowledgeFiles}
+                    generalFiles={generalKnowledgeFiles}
+                    productList={productList}
                     isLoading={isParsingKnowledge}
                 />
              </div>
@@ -333,7 +333,7 @@ const App: React.FC = () => {
              {showTranscriptionModal && transcription && (
                 <TranscriptionModal isOpen={showTranscriptionModal} onClose={() => setShowTranscriptionModal(false)} transcription={transcription} detectedLanguage={detectedLanguage} />
             )}
-             <KnowledgeBaseModal isOpen={showKnowledgeModal} onClose={() => setShowKnowledgeModal(false)} persistedFiles={persistedKnowledgeFiles} isLoading={isParsingKnowledge} />
+             <KnowledgeBaseModal isOpen={showKnowledgeModal} onClose={() => setShowKnowledgeModal(false)} generalFiles={generalKnowledgeFiles} productList={productList} isLoading={isParsingKnowledge} />
         </div>
     );
 };

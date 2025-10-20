@@ -1,9 +1,7 @@
-
-
 // FIX: Import React to resolve 'Cannot find namespace' errors on React types.
 import React, { useState, useCallback } from 'react';
 import { GoogleGenAI, Modality, Chat } from '@google/genai';
-import type { AdType, AppStatus, ChatMessage, Product, ImageIteration, IterationType, TimeRange } from '../types';
+import type { AdType, AppStatus, ChatMessage, Product, ImageIteration, IterationType, TimeRange, GeneralKnowledgeFile } from '../types';
 import type { Selection } from '../components/StaticAdInputs';
 
 const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {
@@ -63,8 +61,9 @@ interface GeminiHookProps {
     selectedTextTranslation: string | null;
     transcription: string | null;
     detectedLanguage: string | null;
-    knowledgeBaseContent: string | null;
     productList: Product[];
+    generalKnowledgeFiles: GeneralKnowledgeFile[];
+    knowledgeFileContents: Map<string, string>;
     setStatus: (status: AppStatus) => void;
     setError: (error: string | null) => void;
     setChatHistory: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
@@ -73,7 +72,8 @@ interface GeminiHookProps {
 export const useGemini = ({
     adFile, adType, marketingAngle, iterationRequest, negativePrompt, selectedProduct, customProductName,
     selection, referenceAdFile, numberOfIterations, iterationType, selectedText, selectedTextTranslation,
-    transcription, detectedLanguage, knowledgeBaseContent, productList,
+    transcription, detectedLanguage,
+    productList, generalKnowledgeFiles, knowledgeFileContents,
     setStatus, setError, setChatHistory
 }: GeminiHookProps) => {
 
@@ -106,10 +106,36 @@ export const useGemini = ({
                 // ... Image generation logic ...
                 return;
             }
+            
+            // --- Build Knowledge Base Context ---
+            let knowledgeContext = '';
+            const generalContent = generalKnowledgeFiles
+                .map(file => knowledgeFileContents.get(file.path))
+                .filter(Boolean)
+                .join('\n\n');
+
+            if (generalContent) {
+                knowledgeContext += `--- GENERAL KNOWLEDGE START ---\n${generalContent}\n--- GENERAL KNOWLEDGE END ---\n\n`;
+            }
+
+            const productData = productList.find(p => p.name === selectedProduct);
+            if (productData && productData.knowledgeFiles) {
+                const productContent = productData.knowledgeFiles
+                    .map(file => knowledgeFileContents.get(file.path))
+                    .filter(Boolean)
+                    .join('\n\n');
+                if (productContent) {
+                     knowledgeContext += `--- PRODUCT-SPECIFIC KNOWLEDGE FOR ${productData.name} START ---\n${productContent}\n--- PRODUCT-SPECIFIC KNOWLEDGE FOR ${productData.name} END ---\n\n`;
+                }
+            }
+
 
             // --- Text Generation ---
-            const systemInstruction = `You are an expert performance marketing creative strategist...`; // Simplified for brevity
+            const systemInstruction = `You are an expert performance marketing creative strategist and a multi-lingual video/image analyst. Your goal is to provide actionable, creative ideas for A/B testing ads based on the user's input, creative assets, and provided knowledge base.`;
             let promptContext = `**Ad Type:** ${adType}\n**Marketing Angle:** ${marketingAngle}`;
+            if (knowledgeContext) {
+                 promptContext += `\n**Knowledge Base Context:**\n${knowledgeContext}`;
+            }
             const creativeParts: any[] = [];
             let userRequestForPrompt = iterationRequest;
             
@@ -150,8 +176,8 @@ export const useGemini = ({
         }
     }, [
         adFile, selectedProduct, marketingAngle, iterationRequest, setError, setStatus, setChatSession, setChatHistory,
-        productList, customProductName, adType, iterationRequest, negativePrompt, selection, referenceAdFile, numberOfIterations,
-        iterationType, selectedText, selectedTextTranslation, transcription, detectedLanguage, knowledgeBaseContent
+        productList, customProductName, adType, negativePrompt, selection, referenceAdFile, numberOfIterations,
+        iterationType, selectedText, selectedTextTranslation, transcription, detectedLanguage, generalKnowledgeFiles, knowledgeFileContents
     ]);
 
     const handleFollowUpMessage = useCallback(async (e: React.FormEvent, currentChatSession: Chat | null) => {
@@ -191,7 +217,7 @@ export const useGemini = ({
 
 useGemini.translateText = async (text: string, signal: AbortSignal): Promise<string> => {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-    const prompt = `Translate to English. Respond with only the translated text.\n\nText: "${text}"`;
+    const prompt = `Translate the following text to English. Respond with only the translated text, without any introductory phrases.\n\nText: "${text}"`;
     // Fix: The generateContent method expects only one argument. The AbortSignal is not supported in this call signature.
     const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
@@ -222,7 +248,21 @@ useGemini.transcribeVideo = async (videoFile: File): Promise<string> => {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
         const videoBase64 = await fileToBase64(videoFile);
         const videoPart = { inlineData: { mimeType: videoFile.type, data: videoBase64 } };
-        const prompt = `Transcribe ONLY the spoken voiceover. If not English, provide an English translation below:\n---\nENGLISH TRANSLATION:\n[translation]`;
+        const prompt = `You are an expert multi-lingual transcriptionist. Your task is to accurately transcribe the spoken audio in the provided video.
+First, you MUST identify the primary language spoken.
+Then, provide a verbatim transcription in that original language.
+If the original language is NOT English, you MUST also provide a high-quality, natural-sounding English translation.
+Structure your response EXACTLY as follows, without any additional commentary:
+
+LANGUAGE: [Detected Language Code, e.g., es-MX or en-US]
+
+[Full transcription in original language]
+
+---
+ENGLISH TRANSLATION:
+[Full English translation]
+
+If the original language is English, omit the "ENGLISH TRANSLATION" section entirely.`;
         const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: { parts: [videoPart, { text: prompt }] } });
         return response.text;
     } catch (e) {

@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import type { GeneralKnowledgeFile } from '../types';
+import type { GeneralKnowledgeFile, Product } from '../types';
 import Spinner from './Spinner';
 import FileViewerModal from './FileViewerModal';
 
 interface KnowledgeBaseModalProps {
     isOpen: boolean;
     onClose: () => void;
-    persistedFiles: GeneralKnowledgeFile[];
+    generalFiles: GeneralKnowledgeFile[];
+    productList: Product[];
     isLoading: boolean;
 }
 
@@ -16,7 +17,16 @@ const FileIcon = () => (
     </svg>
 );
 
-const KnowledgeBaseModal: React.FC<KnowledgeBaseModalProps> = ({ isOpen, onClose, persistedFiles, isLoading }) => {
+const FileListItem: React.FC<{file: GeneralKnowledgeFile, onSelect: (file: GeneralKnowledgeFile) => void}> = ({ file, onSelect }) => (
+    <div key={file.name} className="flex items-center p-2 rounded-md w-full bg-slate-700/50">
+        <FileIcon />
+        <span className="text-sm font-medium text-slate-300 truncate flex-grow" title={file.name}>{file.name}</span>
+        <button onClick={() => onSelect(file)} className="text-xs ml-4 bg-indigo-600/50 hover:bg-indigo-600 text-white py-1 px-3 rounded-md transition">View</button>
+    </div>
+);
+
+
+const KnowledgeBaseModal: React.FC<KnowledgeBaseModalProps> = ({ isOpen, onClose, generalFiles, productList, isLoading }) => {
     const [password, setPassword] = useState('');
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [authError, setAuthError] = useState('');
@@ -42,6 +52,8 @@ const KnowledgeBaseModal: React.FC<KnowledgeBaseModalProps> = ({ isOpen, onClose
     };
 
     if (!isOpen) return null;
+
+    const productsWithKnowledge = productList.filter(p => p.knowledgeFiles && p.knowledgeFiles.length > 0);
 
     return (
         <>
@@ -88,28 +100,54 @@ const KnowledgeBaseModal: React.FC<KnowledgeBaseModalProps> = ({ isOpen, onClose
                             </form>
                         </div>
                     ) : (
-                         <main className="flex-grow p-6 overflow-y-auto space-y-6">
-                            <section className="space-y-3">
-                                <h3 className="font-semibold text-slate-300">Available Documents</h3>
-                                 <p className="text-xs text-slate-400">New documents must be uploaded directly to the cloud provider (e.g., Cloudinary) and added to the backend `db.json` file.</p>
-                                {isLoading && persistedFiles.length === 0 ? (
+                         <main className="flex-grow p-6 overflow-y-auto space-y-8">
+                             {isLoading && generalFiles.length === 0 && productsWithKnowledge.length === 0 ? (
                                     <div className="flex items-center justify-center text-slate-400 p-4 bg-slate-900/50 rounded-md">
                                         <Spinner /> <span className="ml-2">Loading Knowledge...</span>
                                     </div>
-                                ) : persistedFiles.length > 0 ? (
-                                    <div className="space-y-2 max-h-60 overflow-y-auto pr-2 border border-slate-700/50 rounded-md p-2">
-                                        {persistedFiles.map(file => (
-                                            <div key={file.name} className="flex items-center p-2 rounded-md w-full bg-slate-700/50">
-                                                <FileIcon />
-                                                <span className="text-sm font-medium text-slate-300 truncate flex-grow" title={file.name}>{file.name}</span>
-                                                <button onClick={() => setViewingFile(file)} className="text-xs ml-4 bg-indigo-600/50 hover:bg-indigo-600 text-white py-1 px-3 rounded-md transition">View</button>
-                                            </div>
-                                        ))}
-                                    </div>
                                 ) : (
-                                    <p className="text-sm text-slate-500 text-center py-4 bg-slate-900/50 rounded-md">No knowledge files found.</p>
+                                    <>
+                                        <section className="space-y-3">
+                                            <h3 className="font-semibold text-slate-300">General Knowledge</h3>
+                                            {generalFiles.length > 0 ? (
+                                                <div className="space-y-2">
+                                                    {generalFiles.map(file => <FileListItem key={file.path} file={file} onSelect={setViewingFile} />)}
+                                                </div>
+                                            ) : (
+                                                <p className="text-sm text-slate-500 text-center py-4 bg-slate-900/50 rounded-md">No general knowledge files found.</p>
+                                            )}
+                                        </section>
+
+                                        <section className="space-y-3">
+                                            <h3 className="font-semibold text-slate-300">Product-Specific Knowledge</h3>
+                                            {productsWithKnowledge.length > 0 ? (
+                                                <div className="space-y-4">
+                                                    {productsWithKnowledge.map(product => (
+                                                        <div key={product.name}>
+                                                            <h4 className="font-bold text-sm text-indigo-300 mb-2">{product.name}</h4>
+                                                            <div className="space-y-2 border-l-2 border-slate-700 pl-4">
+                                                                 {product.knowledgeFiles?.map(file => <FileListItem key={file.path} file={file} onSelect={setViewingFile} />)}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="text-sm text-slate-500 text-center py-4 bg-slate-900/50 rounded-md">No product-specific knowledge files found.</p>
+                                            )}
+                                        </section>
+
+                                        <section className="p-4 bg-slate-900/50 rounded-lg border border-slate-700/80 mt-8">
+                                            <h4 className="font-semibold text-slate-300 mb-2">How to add new documents?</h4>
+                                            <ol className="text-xs text-slate-400 list-decimal list-inside space-y-1">
+                                                <li>Upload your PDF or TXT file to a cloud provider (e.g., Firebase Storage, AWS S3).</li>
+                                                <li>Ensure the file is publicly accessible (check CORS settings if needed).</li>
+                                                <li>Open the `data/knowledgeBase.ts` file in the project code.</li>
+                                                <li>Add a new file object to the `generalKnowledge` array or to a specific product's `knowledgeFiles` array.</li>
+                                                <li>Re-deploy the application to see your changes.</li>
+                                            </ol>
+                                        </section>
+                                    </>
                                 )}
-                            </section>
                          </main>
                     )}
                 </div>

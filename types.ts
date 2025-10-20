@@ -12,6 +12,7 @@ export interface Product {
     productPageUrl: string;
     googleSheetUrl?: string;
     googleDocUrl?: string;
+    knowledgeFiles?: GeneralKnowledgeFile[];
 }
 
 export interface GeneralKnowledgeFile {
