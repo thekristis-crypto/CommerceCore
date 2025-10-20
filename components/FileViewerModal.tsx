@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import type { GeneralKnowledgeFile } from '../types';
 import Spinner from './Spinner';
+import { useGemini } from '../hooks/useGemini';
+import { analysisCache } from '../data/analysisCache';
 
 // pdf.js worker configuration
 pdfjs.GlobalWorkerOptions.workerSrc = `https://aistudiocdn.com/pdfjs-dist@^5.4.149/build/pdf.worker.mjs`;
@@ -9,6 +11,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = `https://aistudiocdn.com/pdfjs-dist@^5.4.1
 interface FileViewerModalProps {
     file: GeneralKnowledgeFile | null;
     onClose: () => void;
+    knowledgeFileContents: Map<string, string>;
 }
 
 const CORS_PROXY_URL = 'https://corsproxy.io/?';
@@ -22,7 +25,47 @@ const HeaderButton: React.FC<{ onClick: () => void; title: string; children: Rea
     </button>
 );
 
-const FileViewerModal: React.FC<FileViewerModalProps> = ({ file, onClose }) => {
+// Markdown utility
+const markdownToHtml = (text: string): string => {
+    const lines = text.replace(/</g, "&lt;").replace(/>/g, "&gt;").split('\n');
+    let html = '';
+    let inList = false;
+
+    const processInlineFormatting = (line: string) => {
+        return line
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.*?)\*/g, '<em>$1</em>');
+    };
+    
+    lines.forEach(line => {
+        if (line.trim().startsWith('* ')) {
+            if (!inList) {
+                html += '<ul class="space-y-1 list-disc list-inside pl-1">';
+                inList = true;
+            }
+            html += `<li>${processInlineFormatting(line.trim().substring(2))}</li>`;
+        } else {
+            if (inList) {
+                html += '</ul>';
+                inList = false;
+            }
+            if (line.trim() === '') {
+                 html += '<br/>';
+            } else {
+                html += `<p class="my-2">${processInlineFormatting(line)}</p>`;
+            }
+        }
+    });
+
+    if (inList) {
+        html += '</ul>';
+    }
+
+    return html;
+};
+
+
+const FileViewerModal: React.FC<FileViewerModalProps> = ({ file, onClose, knowledgeFileContents }) => {
     const [pdfDoc, setPdfDoc] = useState<pdfjs.PDFDocumentProxy | null>(null);
     const [currentPage, setCurrentPage] = useState(1);
     const [totalPages, setTotalPages] = useState(0);
@@ -30,6 +73,11 @@ const FileViewerModal: React.FC<FileViewerModalProps> = ({ file, onClose }) => {
     const [thumbnails, setThumbnails] = useState<string[]>([]);
     const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
     const [isRendering, setIsRendering] = useState(false);
+    const [summary, setSummary] = useState<string | null>(null);
+    const [isSummarizing, setIsSummarizing] = useState(false);
+    const [isFromCache, setIsFromCache] = useState(false);
+    const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle');
+
 
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const viewerRef = useRef<HTMLDivElement>(null);
@@ -45,8 +93,7 @@ const FileViewerModal: React.FC<FileViewerModalProps> = ({ file, onClose }) => {
 
             canvas.height = viewport.height;
             canvas.width = viewport.width;
-
-            await page.render({ canvasContext: context, viewport }).promise;
+            await page.render({ canvasContext: context, viewport: viewport, canvas: canvas }).promise;
         } catch (e) {
             console.error(`Failed to render page ${pageNum}`, e);
         } finally {
@@ -65,42 +112,75 @@ const FileViewerModal: React.FC<FileViewerModalProps> = ({ file, onClose }) => {
         activeThumbnail?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }, [currentPage]);
 
+    // PDF Loading and Summarization Effect
     useEffect(() => {
-        if (!file || file.type !== 'application/pdf') {
-             if (file) setStatus('error');
-             return;
-        }
-        const loadPdf = async () => {
+        if (!file) return;
+
+        const loadAndSummarize = async () => {
+            // Reset states
             setStatus('loading');
             setPdfDoc(null);
             setThumbnails([]);
-            try {
-                const proxiedUrl = `${CORS_PROXY_URL}${encodeURIComponent(file.path)}`;
-                const pdf = await pdfjs.getDocument(proxiedUrl).promise;
-                setPdfDoc(pdf);
-                setTotalPages(pdf.numPages);
-                setCurrentPage(1);
-                setZoom(1);
-                setStatus('success');
-                
-                const thumbPromises = Array.from({ length: pdf.numPages }, (_, i) => 
-                    pdf.getPage(i + 1).then(page => {
-                        const canvas = document.createElement('canvas');
-                        const context = canvas.getContext('2d')!;
-                        const viewport = page.getViewport({ scale: 0.2 });
-                        canvas.width = viewport.width;
-                        canvas.height = viewport.height;
-                        return page.render({ canvasContext: context, viewport }).promise.then(() => canvas.toDataURL());
-                    })
-                );
-                setThumbnails(await Promise.all(thumbPromises));
-            } catch (error) {
-                console.error('Failed to load PDF:', error);
-                setStatus('error');
+            setSummary(null);
+            setIsSummarizing(false);
+            setIsFromCache(false);
+            setCopyStatus('idle');
+
+            // Check cache first
+            if (analysisCache.has(file.path)) {
+                setSummary(analysisCache.get(file.path)!);
+                setIsFromCache(true);
+            } else {
+                 const content = knowledgeFileContents.get(file.path);
+                 if (content) {
+                     setIsSummarizing(true);
+                     try {
+                         const aiSummary = await useGemini.summarizeDocument(content);
+                         setSummary(aiSummary);
+                     } catch (e) {
+                         setSummary("Failed to generate AI summary for this document.");
+                     } finally {
+                         setIsSummarizing(false);
+                     }
+                 } else {
+                      setSummary("Document content not pre-loaded. AI analysis unavailable.");
+                 }
+            }
+
+            // Load PDF for viewing
+            if (file.type === 'application/pdf') {
+                try {
+                    const proxiedUrl = `${CORS_PROXY_URL}${encodeURIComponent(file.path)}`;
+                    const pdf = await pdfjs.getDocument(proxiedUrl).promise;
+                    setPdfDoc(pdf);
+                    setTotalPages(pdf.numPages);
+                    setCurrentPage(1);
+                    setZoom(1);
+                    setStatus('success');
+                    
+                    const thumbPromises = Array.from({ length: pdf.numPages }, (_, i) => 
+                        pdf.getPage(i + 1).then(page => {
+                            const canvas = document.createElement('canvas');
+                            const context = canvas.getContext('2d')!;
+                            const viewport = page.getViewport({ scale: 0.2 });
+                            canvas.width = viewport.width;
+                            canvas.height = viewport.height;
+                            return page.render({ canvasContext: context, viewport: viewport, canvas: canvas }).promise.then(() => canvas.toDataURL());
+                        })
+                    );
+                    setThumbnails(await Promise.all(thumbPromises));
+                } catch (error) {
+                    console.error('Failed to load PDF:', error);
+                    setStatus('error');
+                }
+            } else {
+                 setStatus('error'); // Not a PDF
             }
         };
-        loadPdf();
-    }, [file]);
+
+        loadAndSummarize();
+    }, [file, knowledgeFileContents]);
+
 
     const handleDownload = async () => {
         if (!file) return;
@@ -116,6 +196,17 @@ const FileViewerModal: React.FC<FileViewerModalProps> = ({ file, onClose }) => {
             console.error('Download failed:', error);
             window.open(file.path, '_blank');
         }
+    };
+
+    const handleCopyToCache = () => {
+        if (!summary || !file) return;
+        // Escape backticks in the summary content
+        const escapedSummary = summary.replace(/`/g, '\\`');
+        const textToCopy = `analysisCache.set(\n  '${file.path}',\n  \`${escapedSummary}\`\n);`;
+        navigator.clipboard.writeText(textToCopy).then(() => {
+            setCopyStatus('copied');
+            setTimeout(() => setCopyStatus('idle'), 2500);
+        });
     };
 
     const changePage = (offset: number) => setCurrentPage(prev => Math.max(1, Math.min(prev + offset, totalPages)));
@@ -155,7 +246,7 @@ const FileViewerModal: React.FC<FileViewerModalProps> = ({ file, onClose }) => {
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4" onClick={onClose}>
-            <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-6xl h-[95vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-7xl h-[95vh] flex flex-col" onClick={e => e.stopPropagation()}>
                 <header className="flex-shrink-0 grid grid-cols-3 items-center p-2 border-b border-slate-700 gap-4 text-sm">
                     <h2 className="font-bold text-white truncate px-2" title={file.name}>{file.name}</h2>
                     
@@ -194,7 +285,7 @@ const FileViewerModal: React.FC<FileViewerModalProps> = ({ file, onClose }) => {
                     </div>
                 </header>
 
-                <main className="flex-grow flex overflow-hidden">
+                <div className="flex-grow flex overflow-hidden">
                     <aside className="w-48 flex-shrink-0 bg-slate-950/50 p-2 overflow-y-auto">
                         <div ref={thumbnailContainerRef} className="space-y-2">
                             {thumbnails.map((thumb, index) => (
@@ -208,17 +299,43 @@ const FileViewerModal: React.FC<FileViewerModalProps> = ({ file, onClose }) => {
                              ))}
                         </div>
                     </aside>
-                    <div ref={viewerRef} className="flex-grow bg-slate-800/50 overflow-auto p-4 flex justify-center items-center relative">
-                        {status === 'loading' && <div className="flex flex-col items-center text-slate-400"><Spinner /> Loading PDF...</div>}
-                        {status === 'error' && <div className="text-red-400">Failed to load PDF. Please check the file URL and CORS policy.</div>}
+                    <main ref={viewerRef} className="flex-grow bg-slate-800/50 overflow-auto p-4 flex justify-center items-start relative">
+                        {status === 'loading' && <div className="flex flex-col items-center text-slate-400 m-auto"><Spinner /> Loading PDF...</div>}
+                        {status === 'error' && <div className="text-red-400 m-auto">Failed to load PDF. Please check the file URL and CORS policy.</div>}
                         {status === 'success' && (
-                            <div className="relative">
+                            <div className="relative my-auto">
                                 <canvas ref={canvasRef} className="shadow-lg" />
                                 {isRendering && <div className="absolute inset-0 bg-slate-800/50 flex items-center justify-center"><Spinner /></div>}
                             </div>
                         )}
-                    </div>
-                </main>
+                    </main>
+                    <aside className="w-80 flex-shrink-0 bg-slate-950/50 border-l border-slate-700 flex flex-col">
+                        <h3 className="text-lg font-bold p-4 border-b border-slate-700 flex-shrink-0">AI Analysis</h3>
+                        <div className="flex-grow p-4 overflow-y-auto text-sm text-slate-300 leading-relaxed">
+                             {isSummarizing && <div className="flex flex-col items-center text-slate-400 pt-8"><Spinner /> Generating Overview...</div>}
+                             {summary && (
+                                <div
+                                    className="prose prose-invert prose-sm max-w-none"
+                                    dangerouslySetInnerHTML={{ __html: markdownToHtml(summary) }}
+                                />
+                             )}
+                             {!isSummarizing && summary && !isFromCache && (
+                                <div className="mt-4 pt-4 border-t border-slate-700">
+                                    <button
+                                        onClick={handleCopyToCache}
+                                        className="w-full flex items-center justify-center gap-2 text-sm bg-indigo-600/50 hover:bg-indigo-600/80 text-white font-semibold py-2 px-4 rounded-md transition-colors"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM5 11a1 1 0 100 2h4a1 1 0 100-2H5z" /><path fillRule="evenodd" d="M2 5a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3 1h10a1 1 0 011 1v7a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z" clipRule="evenodd" /></svg>
+                                        {copyStatus === 'copied' ? 'Copied!' : 'Copy for Cache'}
+                                    </button>
+                                     <p className="text-xs text-slate-500 mt-2 text-center">
+                                        Save this analysis to make it load instantly next time.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    </aside>
+                </div>
             </div>
         </div>
     );

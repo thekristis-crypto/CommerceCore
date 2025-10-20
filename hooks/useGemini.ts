@@ -270,3 +270,35 @@ If the original language is English, omit the "ENGLISH TRANSLATION" section enti
         return "Could not generate transcription.";
     }
 };
+
+useGemini.summarizeDocument = async (text: string): Promise<string> => {
+    if (!text) return "No content to analyze.";
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+        const prompt = `You are a helpful AI assistant. Provide a comprehensive overview of the following document content. Focus on the key topics, main arguments, and important takeaways. Format your response using markdown for clarity.\n\nDOCUMENT CONTENT:\n"""\n${text.substring(0, 15000)}\n"""`;
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: { parts: [{ text: prompt }] },
+        });
+        return response.text;
+    } catch (e) {
+        console.error("Summarization failed:", e);
+        return "Could not generate a summary for this document.";
+    }
+};
+
+useGemini.summarizeProductKnowledge = async (productName: string, knowledgeText: string): Promise<string> => {
+    if (!knowledgeText) return "";
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+        const prompt = `Based on the following document(s) for the product "${productName}", extract 2-3 of the most critical points that are essential for creating marketing ads. Present them as a short, concise bulleted list. Respond ONLY with the bulleted list.\n\nKNOWLEDGE CONTENT:\n"""\n${knowledgeText.substring(0, 15000)}\n"""`;
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: { parts: [{ text: prompt }] },
+        });
+        return response.text;
+    } catch (e) {
+        console.error("Product knowledge summarization failed:", e);
+        return "Could not summarize product knowledge.";
+    }
+};

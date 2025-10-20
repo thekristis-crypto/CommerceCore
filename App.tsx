@@ -19,6 +19,7 @@ import TranscriptionModal from './components/TranscriptionModal';
 import StaticAdEditor from './components/StaticAdInputs';
 import PresetPrompts from './components/PresetPrompts';
 import KnowledgeBaseModal from './components/KnowledgeBaseModal';
+import ProductKnowledgeSummary from './components/ProductKnowledgeSummary';
 
 const App: React.FC = () => {
     const {
@@ -52,6 +53,8 @@ const App: React.FC = () => {
     } = useKnowledgeBase();
 
     const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+    const [productKnowledgeSummary, setProductKnowledgeSummary] = useState<string | null>(null);
+    const [isSummarizingKnowledge, setIsSummarizingKnowledge] = useState(false);
 
     const {
         chatSession,
@@ -112,6 +115,46 @@ const App: React.FC = () => {
         return () => controller.abort();
 
     }, [selectedText, detectedLanguage, setSelectedTextTranslation, setIsTranslatingSelection]);
+
+    // Generate product knowledge summary
+    useEffect(() => {
+        const generateSummary = async () => {
+            if (!selectedProduct || selectedProduct === 'Other') {
+                setProductKnowledgeSummary(null);
+                return;
+            }
+
+            const productData = productList.find(p => p.name === selectedProduct);
+            const hasKnowledgeFiles = productData?.knowledgeFiles && productData.knowledgeFiles.length > 0;
+            
+            if (hasKnowledgeFiles && knowledgeFileContents.size > 0) {
+                const relevantContent = productData.knowledgeFiles
+                    .map(file => knowledgeFileContents.get(file.path))
+                    .filter(Boolean)
+                    .join('\n\n');
+
+                if (relevantContent) {
+                    setIsSummarizingKnowledge(true);
+                    setProductKnowledgeSummary(null);
+                    try {
+                        const summary = await useGemini.summarizeProductKnowledge(productData.name, relevantContent);
+                        setProductKnowledgeSummary(summary);
+                    } catch (err) {
+                        console.error("Failed to summarize product knowledge:", err);
+                        setProductKnowledgeSummary(null);
+                    } finally {
+                        setIsSummarizingKnowledge(false);
+                    }
+                } else {
+                    setProductKnowledgeSummary(null);
+                }
+            } else {
+                setProductKnowledgeSummary(null);
+            }
+        };
+
+        generateSummary();
+    }, [selectedProduct, knowledgeFileContents, productList]);
 
 
     const handleFileChange = async (file: File) => {
@@ -186,6 +229,7 @@ const App: React.FC = () => {
                     generalFiles={generalKnowledgeFiles}
                     productList={productList}
                     isLoading={isParsingKnowledge}
+                    knowledgeFileContents={knowledgeFileContents}
                 />
              </div>
         )
@@ -253,6 +297,11 @@ const App: React.FC = () => {
                                     {selectedProduct === 'Other' && (
                                         <input type="text" value={customProductName} onChange={e => setCustomProductName(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-md p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="Enter Custom Product Name" />
                                     )}
+                                    <ProductKnowledgeSummary
+                                        productName={selectedProduct}
+                                        summary={productKnowledgeSummary}
+                                        isLoading={isSummarizingKnowledge}
+                                    />
                                     <div>
                                         <label htmlFor="angle" className="block text-sm font-medium text-slate-300 mb-1">Marketing Angle</label>
                                         <div className="relative">
@@ -333,7 +382,7 @@ const App: React.FC = () => {
              {showTranscriptionModal && transcription && (
                 <TranscriptionModal isOpen={showTranscriptionModal} onClose={() => setShowTranscriptionModal(false)} transcription={transcription} detectedLanguage={detectedLanguage} />
             )}
-             <KnowledgeBaseModal isOpen={showKnowledgeModal} onClose={() => setShowKnowledgeModal(false)} generalFiles={generalKnowledgeFiles} productList={productList} isLoading={isParsingKnowledge} />
+             <KnowledgeBaseModal isOpen={showKnowledgeModal} onClose={() => setShowKnowledgeModal(false)} generalFiles={generalKnowledgeFiles} productList={productList} isLoading={isParsingKnowledge} knowledgeFileContents={knowledgeFileContents} />
         </div>
     );
 };

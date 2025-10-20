@@ -7,8 +7,8 @@ export const knowledgeBaseData: KnowledgeBase = {
       "knowledgeFiles": [
         {
            "type": "application/pdf",
-           "name": "THT Doc (Shameless Snacks).pdf",
-           "path": "https://firebasestorage.googleapis.com/v0/b/my-project-6b8f0.firebasestorage.app/o/THT%20Doc%20(Shameless%20Snacks).pdf?alt=media&token=b3982112-8046-4687-8fd4-fef3f5896366"
+           "name": "AliveBlue [PRODUCT INFO] Hydrogen bottle.pdf",
+           "path": "https://firebasestorage.googleapis.com/v0/b/my-project-6b8f0.firebasestorage.app/o/AliveBlue%20%5BPRODUCT%20INFO%5D%20Hydrogen%20bottle.pdf?alt=media&token=80972cfb-34e7-4629-b10e-9a645b66a6f8"
         }
       ]
     },
@@ -39,6 +39,11 @@ export const knowledgeBaseData: KnowledgeBase = {
       "type": "application/pdf",
       "name": "Framework Breakdown.pdf",
       "path": "https://firebasestorage.googleapis.com/v0/b/my-project-6b8f0.firebasestorage.app/o/Framework%20Breakdown.pdf?alt=media&token=cb965807-be01-4367-b99d-ff304a7a18d7"
+    },
+    {
+       "type": "application/pdf",
+       "name": "THT Doc (Shameless Snacks).pdf",
+       "path": "https://firebasestorage.googleapis.com/v0/b/my-project-6b8f0.firebasestorage.app/o/THT%20Doc%20(Shameless%20Snacks).pdf?alt=media&token=b3982112-8046-4687-8fd4-fef3f5896366"
     }
   ]
 };

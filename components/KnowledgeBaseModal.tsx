@@ -9,6 +9,7 @@ interface KnowledgeBaseModalProps {
     generalFiles: GeneralKnowledgeFile[];
     productList: Product[];
     isLoading: boolean;
+    knowledgeFileContents: Map<string, string>;
 }
 
 const FileIcon = () => (
@@ -26,7 +27,7 @@ const FileListItem: React.FC<{file: GeneralKnowledgeFile, onSelect: (file: Gener
 );
 
 
-const KnowledgeBaseModal: React.FC<KnowledgeBaseModalProps> = ({ isOpen, onClose, generalFiles, productList, isLoading }) => {
+const KnowledgeBaseModal: React.FC<KnowledgeBaseModalProps> = ({ isOpen, onClose, generalFiles, productList, isLoading, knowledgeFileContents }) => {
     const [password, setPassword] = useState('');
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [authError, setAuthError] = useState('');
@@ -152,7 +153,7 @@ const KnowledgeBaseModal: React.FC<KnowledgeBaseModalProps> = ({ isOpen, onClose
                     )}
                 </div>
             </div>
-             <FileViewerModal file={viewingFile} onClose={() => setViewingFile(null)} />
+             <FileViewerModal file={viewingFile} onClose={() => setViewingFile(null)} knowledgeFileContents={knowledgeFileContents} />
              <style>{`
                 @keyframes fade-in-scale {
                     from { opacity: 0; transform: scale(0.95); }
