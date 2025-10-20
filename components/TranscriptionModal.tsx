@@ -85,8 +85,9 @@ const TranscriptionModal: React.FC<TranscriptionModalProps> = ({ transcription, 
 
     const separatorRegex = /---\s*ENGLISH TRANSLATION:/i;
     const parts = transcription.split(separatorRegex);
-    const originalText = parts[0]?.trim();
-    const translatedText = parts.length > 1 ? parts[1].trim() : null;
+    const originalPart = parts[0] || '';
+    const originalText = originalPart.replace(/^LANGUAGE: .*\n\n?/i, '').trim();
+    const translatedText = parts.length > 1 ? (parts[1] || '').trim() : null;
 
     const handleCopy = (text: string, section: 'original' | 'translation') => {
         navigator.clipboard.writeText(text).then(() => {

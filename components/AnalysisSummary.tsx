@@ -1,9 +1,8 @@
 import React from 'react';
-import type { FilenameAnalysis, AnalysisSource } from '../types';
+import type { FilenameAnalysis } from '../types';
 
 interface AnalysisSummaryProps {
-    source: AnalysisSource;
-    data: FilenameAnalysis;
+    analysis: FilenameAnalysis | null;
     detectedLanguage: string | null;
 }
 
@@ -26,30 +25,36 @@ const getFlagEmoji = (locale: string): string => {
 };
 
 
-const AnalysisSummary: React.FC<AnalysisSummaryProps> = ({ source, data, detectedLanguage }) => {
-    if (!source) return null;
-
-    const sourceText = source === 'filename' ? 'Analysis source: Filename' : 'Analysis source: Ad content';
+const AnalysisSummary: React.FC<AnalysisSummaryProps> = ({ analysis, detectedLanguage }) => {
     
-    const localeValue = data.locale ? `${getFlagEmoji(data.locale)} ${data.locale}` : (detectedLanguage ? `${getFlagEmoji(detectedLanguage)} ${detectedLanguage}` : null);
+    if (!analysis) {
+        return (
+            <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700 space-y-2">
+                <p className="text-xs text-slate-400 italic">Filename Analysis</p>
+                <p className="text-sm text-slate-300">Could not parse filename. Please ensure it follows the standard naming convention to enable auto-fill.</p>
+            </div>
+        );
+    }
+
+    const localeValue = analysis.locale ? `${getFlagEmoji(analysis.locale)} ${analysis.locale}` : (detectedLanguage ? `${getFlagEmoji(detectedLanguage)} ${detectedLanguage}` : null);
     
     const fields = [
-        { label: 'Product', value: data.productName },
-        { label: 'Platform', value: data.platform },
+        { label: 'Product', value: analysis.productName },
+        { label: 'Platform', value: analysis.platform },
         { label: 'Locale', value: localeValue },
-        { label: 'Batch/Ver', value: data.batchAndVersion },
-        { label: 'Original Ad', value: data.originalBatchInfo },
-        { label: 'Type', value: data.adType },
-        { label: 'Format', value: data.adFormat },
-        { label: 'Angle', value: data.angle },
-        { label: 'Editor', value: data.veInitials },
+        { label: 'Batch/Ver', value: analysis.batchAndVersion },
+        { label: 'Original Ad', value: analysis.originalBatchInfo },
+        { label: 'Type', value: analysis.adType },
+        { label: 'Format', value: analysis.adFormat },
+        { label: 'Angle', value: analysis.angle },
+        { label: 'Editor', value: analysis.veInitials },
     ].filter(field => field.value);
 
     if (fields.length === 0) return null;
 
     return (
         <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700 space-y-2">
-            <p className="text-xs text-slate-400 italic">{sourceText}</p>
+            <p className="text-xs text-slate-400 italic">Analysis source: Filename</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
                 {fields.map(field => (
                      <div key={field.label} className="truncate flex items-baseline">

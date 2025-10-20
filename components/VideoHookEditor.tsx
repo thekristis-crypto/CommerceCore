@@ -16,7 +16,9 @@ interface VideoTextSelectorProps {
 const parseTranscription = (transcription: string): string => {
     const separatorRegex = /---\s*ENGLISH TRANSLATION:/i;
     const parts = transcription.split(separatorRegex);
-    return parts[0]?.trim() || '';
+    const originalPart = parts[0] || '';
+    // Remove the LANGUAGE: ... line from the start of the transcription for a clean display.
+    return originalPart.replace(/^LANGUAGE: .*\n\n?/i, '').trim();
 };
 
 const VideoTextSelector: React.FC<VideoTextSelectorProps> = ({ videoUrl, transcription, isTranscribing, selectedText, onTextSelect, onBack, translation, isTranslating }) => {
