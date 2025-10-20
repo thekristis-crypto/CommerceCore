@@ -1,0 +1,42 @@
+import type { KnowledgeBase } from '../types';
+
+export const knowledgeBaseData: KnowledgeBase = {
+  "products": [
+    {
+      "name": "AliveBlue", "shortName": "AliveBlue", "description": "A portable bottle that enriches water with molecular hydrogen.", "features": ["Advanced SPE/PEM technology", "Portable and resistant design", "BPA-free", "No filters or maintenance"], "benefits": ["High concentration of hydrogen", "Rich in antioxidants", "Improves hydration and wellness"], "productPageUrl": "https://getaliveblue.com/"
+    },
+    {
+      "name": "CleanlixMold", "shortName": "CleanlixMold", "description": "A powerful, fast-acting mold and mildew remover.", "features": ["Fast-acting formula", "No-scrub application", "Prevents regrowth", "Works on multiple surfaces"], "benefits": ["Effortlessly removes tough mold stains", "Keeps surfaces clean and safe", "Saves time and effort"], "productPageUrl": ""
+    },
+    {
+      "name": "OriBreeze", "shortName": "OriBreeze", "description": "A portable bottle that enriches water with molecular hydrogen.", "features": ["Advanced SPE/PEM technology", "Portable and resistant design", "BPA-free", "No filters or maintenance"], "benefits": ["High concentration of hydrogen", "Rich in antioxidants", "Improves hydration and wellness"], "productPageUrl": "http://oribreeze.com/"
+    }
+  ],
+  "generalKnowledge": [
+    {
+      "type": "application/pdf",
+      "name": "ad hook swipefile.pdf",
+      "path": "https://firebasestorage.googleapis.com/v0/b/my-project-6b8f0.firebasestorage.app/o/ad%20hook%20swipefile.pdf?alt=media&token=5bf8148e-11fa-415b-8fb8-0cee05e8e065"
+    },
+    {
+      "type": "application/pdf",
+      "name": "Cashvertising.pdf",
+      "path": "https://firebasestorage.googleapis.com/v0/b/my-project-6b8f0.firebasestorage.app/o/Cashvertising.pdf?alt=media&token=4af207b8-ef23-4fab-9ca4-548387dc9e6c"
+    },
+    {
+      "type": "application/pdf",
+      "name": "Clayton_Makepeace_-_Bullets_Lesson Screaming Eagle.pdf",
+      "path": "https://firebasestorage.googleapis.com/v0/b/my-project-6b8f0.firebasestorage.app/o/Clayton_Makepeace_-_Bullets_Lesson%20Screaming%20Eagle.pdf?alt=media&token=387df540-0c5d-4d0c-bbd3-4cfcb581a608"
+    },
+    {
+      "type": "application/pdf",
+      "name": "Framework Breakdown.pdf",
+      "path": "https://firebasestorage.googleapis.com/v0/b/my-project-6b8f0.firebasestorage.app/o/Framework%20Breakdown.pdf?alt=media&token=cb965807-be01-4367-b99d-ff304a7a18d7"
+    },
+    {
+      "type": "application/pdf",
+      "name": "THT Doc (Shameless Snacks).pdf",
+      "path": "https://firebasestorage.googleapis.com/v0/b/my-project-6b8f0.firebasestorage.app/o/THT%20Doc%20(Shameless%20Snacks).pdf?alt=media&token=b3982112-8046-4687-8fd4-fef3f5896366"
+    }
+  ]
+};

@@ -1,5 +1,7 @@
 
-import { useState, useCallback } from 'react';
+
+// FIX: Import React to resolve 'Cannot find namespace' errors on React types.
+import React, { useState, useCallback } from 'react';
 import { GoogleGenAI, Modality, Chat } from '@google/genai';
 import type { AdType, AppStatus, ChatMessage, Product, ImageIteration, IterationType, TimeRange } from '../types';
 import type { Selection } from '../components/StaticAdInputs';

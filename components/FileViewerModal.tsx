@@ -2,30 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import type { GeneralKnowledgeFile } from '../types';
 import Spinner from './Spinner';
 
-/**
- * Transforms an incorrect Cloudinary "collection" URL (a link to an HTML preview page)
- * into a direct "resource" delivery URL that points to the raw file.
- * This is necessary to bypass browser security features (like X-Frame-Options)
- * that prevent embedding the management page in an iframe.
- * @param url The original URL from the database.
- * @param filename The name of the file, used to construct the public ID.
- * @returns A direct delivery URL (res.cloudinary.com) or the original URL if no transformation is needed.
- */
-const transformCloudinaryUrl = (url: string, filename: string): string => {
-    if (url.includes('collection.cloudinary.com')) {
-        const match = url.match(/collection\.cloudinary\.com\/([^/]+)/);
-        if (match && match[1]) {
-            const cloudName = match[1];
-            // Construct the standard direct delivery URL.
-            // The 'image' asset type is often used for PDFs, and 'upload' is the standard delivery type.
-            // encodeURIComponent handles spaces and special characters in the filename.
-            return `https://res.cloudinary.com/${cloudName}/image/upload/${encodeURIComponent(filename)}`;
-        }
-    }
-    // Return the original URL if it's not a collection URL or if the regex fails.
-    return url; 
-};
-
+// A reliable public CORS proxy to fetch files from cloud storage without needing a custom backend.
+const CORS_PROXY_URL = 'https://corsproxy.io/?';
 
 const FileViewerModal: React.FC<{ file: GeneralKnowledgeFile | null; onClose: () => void; }> = ({ file, onClose }) => {
     const [textContent, setTextContent] = useState<string | null>(null);
@@ -37,10 +15,13 @@ const FileViewerModal: React.FC<{ file: GeneralKnowledgeFile | null; onClose: ()
             setIsLoading(true);
             setError(null);
             setTextContent(null);
-            const fileUrl = file.path;
-            fetch(fileUrl)
+            
+            // Fetch text files via the public CORS proxy.
+            const proxyUrl = `${CORS_PROXY_URL}${file.path}`;
+            
+            fetch(proxyUrl)
                 .then(res => {
-                    if (!res.ok) throw new Error(`Failed to fetch text file. Status: ${res.status}. Please check the file URL.`);
+                    if (!res.ok) throw new Error(`Failed to fetch text file. Status: ${res.status}. Please check the file URL is correct.`);
                     return res.text();
                 })
                 .then(text => setTextContent(text))
@@ -59,8 +40,8 @@ const FileViewerModal: React.FC<{ file: GeneralKnowledgeFile | null; onClose: ()
 
     if (!file) return null;
     
-    // Always use the transformed URL for viewing and downloading.
-    const fileUrl = transformCloudinaryUrl(file.path, file.name);
+    // Construct the proxy URL for viewing and downloading.
+    const proxyFileUrl = `${CORS_PROXY_URL}${file.path}`;
 
     return (
         <div 
@@ -74,10 +55,10 @@ const FileViewerModal: React.FC<{ file: GeneralKnowledgeFile | null; onClose: ()
                 <header className="flex-shrink-0 flex justify-between items-center p-4 border-b border-slate-700">
                     <h2 className="text-lg font-bold text-white truncate pr-4" title={file.name}>{file.name}</h2>
                     <div className="flex items-center gap-4">
-                        <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs bg-slate-700/50 hover:bg-slate-700 text-slate-300 py-1.5 px-3 rounded-md transition-colors">
+                        <a href={proxyFileUrl} target="_blank" rel="noopener noreferrer" className="text-xs bg-slate-700/50 hover:bg-slate-700 text-slate-300 py-1.5 px-3 rounded-md transition-colors">
                             View Original
                         </a>
-                         <a href={fileUrl} download={file.name} className="text-xs bg-slate-700/50 hover:bg-slate-700 text-slate-300 py-1.5 px-3 rounded-md transition-colors">
+                         <a href={proxyFileUrl} download={file.name} className="text-xs bg-slate-700/50 hover:bg-slate-700 text-slate-300 py-1.5 px-3 rounded-md transition-colors">
                             Download
                         </a>
                         <button onClick={onClose} className="text-slate-500 hover:text-white hover:bg-slate-700 rounded-full p-1 transition-colors">
@@ -88,7 +69,7 @@ const FileViewerModal: React.FC<{ file: GeneralKnowledgeFile | null; onClose: ()
 
                 <main className="flex-grow flex bg-slate-950/50 relative">
                     {file.type === 'application/pdf' ? (
-                        <iframe src={fileUrl} title={file.name} className="w-full h-full border-0" />
+                        <iframe src={proxyFileUrl} title={file.name} className="w-full h-full border-0" />
                     ) : file.type === 'text/plain' ? (
                         <div className="w-full h-full overflow-auto p-4">
                             {isLoading && <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80"><Spinner /></div>}
