@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AdType, AppStatus, Product, FilenameAnalysis, AnalysisSource, ImageIteration, IterationType, TimeRange } from '../types';
+import { AdType, AppStatus, Product, FilenameAnalysis, AnalysisSource, ImageIteration, IterationType, TimeRange, TranscriptionData } from '../types';
 import { Selection } from '../components/StaticAdInputs';
 
 export const useAdState = () => {
@@ -27,7 +27,7 @@ export const useAdState = () => {
 
     // Feature State
     const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
-    const [transcription, setTranscription] = useState<string | null>(null);
+    const [transcription, setTranscription] = useState<TranscriptionData | null>(null);
     const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
     const [showTranscriptionModal, setShowTranscriptionModal] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
@@ -42,7 +42,9 @@ export const useAdState = () => {
     // Video Iteration State
     const [iterationType, setIterationType] = useState<IterationType | null>(null);
     const [selectedText, setSelectedText] = useState<string | null>(null);
+    // FIX: Declare the missing 'selectedTimeRange' and 'setSelectedTimeRange' state variables.
     const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange | null>(null);
+    const [selectedTextTimeRange, setSelectedTextTimeRange] = useState<TimeRange | null>(null);
     const [selectedTextTranslation, setSelectedTextTranslation] = useState<string | null>(null);
     const [isTranslatingSelection, setIsTranslatingSelection] = useState(false);
 
@@ -76,6 +78,7 @@ export const useAdState = () => {
         setIterationType(null);
         setSelectedText(null);
         setSelectedTimeRange(null);
+        setSelectedTextTimeRange(null);
         setSelectedTextTranslation(null);
         setIsTranslatingSelection(false);
         setCompressionProgress(0);
@@ -101,7 +104,8 @@ export const useAdState = () => {
         selectedIteration, setSelectedIteration, referenceAdFile, setReferenceAdFile,
         referenceFilePreview, setReferenceFilePreview, numberOfIterations, setNumberOfIterations,
         iterationType, setIterationType, selectedText, setSelectedText,
-        selectedTimeRange, setSelectedTimeRange, selectedTextTranslation, setSelectedTextTranslation,
+        selectedTimeRange, setSelectedTimeRange, selectedTextTimeRange, setSelectedTextTimeRange,
+        selectedTextTranslation, setSelectedTextTranslation,
         isTranslatingSelection, setIsTranslatingSelection,
         compressionProgress, setCompressionProgress,
         resetState

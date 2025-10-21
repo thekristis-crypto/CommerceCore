@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import type { TranscriptionData } from '../types';
 
 interface TranscriptionModalProps {
-    transcription: string;
+    transcriptionData: TranscriptionData;
     onClose: () => void;
     isOpen: boolean;
-    detectedLanguage: string | null;
 }
 
 const getFlagEmoji = (locale: string | null): string => {
     if (!locale) return '🏳️';
-    // Use the first part of the locale for the flag (e.g., 'en' from 'en-US')
     const code = locale.toUpperCase().split(/[-_]/)[0];
     const flags: { [key: string]: string } = {
         US: '🇺🇸', UK: '🇬🇧', GB: '🇬🇧', EN: '🇺🇸', ES: '🇪🇸', DE: '🇩🇪', FR: '🇫🇷', PT: '🇵🇹', IT: '🇮🇹', AU: '🇦🇺',
@@ -23,7 +22,6 @@ const getLanguageName = (locale: string | null): string => {
         const langCode = locale.split(/[-_]/)[0];
         const displayName = new Intl.DisplayNames(['en'], { type: 'language' });
         const name = displayName.of(langCode);
-        // Capitalize the first letter
         return name ? name.charAt(0).toUpperCase() + name.slice(1) : 'Original Language';
     } catch (e) {
         console.error("Could not get language name for locale:", locale, e);
@@ -70,24 +68,16 @@ const TranscriptionBlock = ({ title, emoji, text, section, onCopy, copiedSection
 };
 
 
-const TranscriptionModal: React.FC<TranscriptionModalProps> = ({ transcription, onClose, isOpen, detectedLanguage }) => {
+const TranscriptionModal: React.FC<TranscriptionModalProps> = ({ transcriptionData, onClose, isOpen }) => {
     const [copiedSection, setCopiedSection] = useState<'original' | 'translation' | null>(null);
 
     useEffect(() => {
-        if (!isOpen) {
-            setCopiedSection(null);
-        }
+        if (!isOpen) setCopiedSection(null);
     }, [isOpen]);
 
-    if (!isOpen) {
-        return null;
-    }
+    if (!isOpen) return null;
 
-    const separatorRegex = /---\s*ENGLISH TRANSLATION:/i;
-    const parts = transcription.split(separatorRegex);
-    const originalPart = parts[0] || '';
-    const originalText = originalPart.replace(/^LANGUAGE: .*\n\n?/i, '').trim();
-    const translatedText = parts.length > 1 ? (parts[1] || '').trim() : null;
+    const { language, fullText, translation } = transcriptionData;
 
     const handleCopy = (text: string, section: 'original' | 'translation') => {
         navigator.clipboard.writeText(text).then(() => {
@@ -121,13 +111,13 @@ const TranscriptionModal: React.FC<TranscriptionModalProps> = ({ transcription, 
                 </div>
                 
                 <div className="flex-grow overflow-y-auto space-y-6 pr-2 -mr-2">
-                    {originalText ? (
+                    {fullText ? (
                         <TranscriptionBlock 
-                            title={getLanguageName(detectedLanguage)}
-                            emoji={getFlagEmoji(detectedLanguage)}
-                            text={originalText}
+                            title={getLanguageName(language)}
+                            emoji={getFlagEmoji(language)}
+                            text={fullText}
                             section="original"
-                            onCopy={() => handleCopy(originalText, 'original')}
+                            onCopy={() => handleCopy(fullText, 'original')}
                             copiedSection={copiedSection}
                         />
                     ) : (
@@ -137,9 +127,9 @@ const TranscriptionModal: React.FC<TranscriptionModalProps> = ({ transcription, 
                     <TranscriptionBlock 
                         title="English"
                         emoji={getFlagEmoji('en-US')}
-                        text={translatedText}
+                        text={translation}
                         section="translation"
-                        onCopy={() => handleCopy(translatedText || '', 'translation')}
+                        onCopy={() => handleCopy(translation || '', 'translation')}
                         copiedSection={copiedSection}
                     />
                 </div>
@@ -159,21 +149,10 @@ const TranscriptionModal: React.FC<TranscriptionModalProps> = ({ transcription, 
                     to { opacity: 1; transform: scale(1); }
                 }
                 .animate-fade-in-scale { animation: fade-in-scale 0.2s ease-out forwards; }
-                /* Custom scrollbar for webkit browsers */
-                .overflow-y-auto::-webkit-scrollbar {
-                    width: 8px;
-                }
-                .overflow-y-auto::-webkit-scrollbar-track {
-                    background: transparent;
-                }
-                .overflow-y-auto::-webkit-scrollbar-thumb {
-                    background-color: rgba(129, 140, 248, 0.4);
-                    border-radius: 20px;
-                    border: 3px solid transparent;
-                }
-                 .overflow-y-auto::-webkit-scrollbar-thumb:hover {
-                    background-color: rgba(129, 140, 248, 0.6);
-                }
+                .overflow-y-auto::-webkit-scrollbar { width: 8px; }
+                .overflow-y-auto::-webkit-scrollbar-track { background: transparent; }
+                .overflow-y-auto::-webkit-scrollbar-thumb { background-color: rgba(129, 140, 248, 0.4); border-radius: 20px; border: 3px solid transparent; }
+                .overflow-y-auto::-webkit-scrollbar-thumb:hover { background-color: rgba(129, 140, 248, 0.6); }
             `}</style>
         </div>
     );

@@ -2,9 +2,10 @@ import React from 'react';
 
 interface CompressionModalProps {
     progress: number;
+    onCancel: () => void;
 }
 
-const CompressionModal: React.FC<CompressionModalProps> = ({ progress }) => {
+const CompressionModal: React.FC<CompressionModalProps> = ({ progress, onCancel }) => {
     const percentage = Math.round(progress * 100);
 
     return (
@@ -25,6 +26,12 @@ const CompressionModal: React.FC<CompressionModalProps> = ({ progress }) => {
                     />
                 </div>
                 <p className="text-lg font-mono font-semibold text-indigo-300 mt-4">{percentage}%</p>
+                <button 
+                    onClick={onCancel}
+                    className="mt-6 bg-slate-600/50 hover:bg-slate-600 text-slate-300 font-bold py-2 px-6 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-slate-500"
+                >
+                    Cancel
+                </button>
             </div>
         </div>
     );

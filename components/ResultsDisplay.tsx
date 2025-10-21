@@ -1,4 +1,5 @@
-import React from 'react';
+// FIX: Import 'useRef' and 'useLayoutEffect' to resolve 'Cannot find name' errors.
+import React, { useRef, useLayoutEffect } from 'react';
 import type { ChatMessage, AppStatus, ImageIteration, AdType } from '../types';
 import Spinner from './Spinner';
 
@@ -161,9 +162,21 @@ const ImageIterationResults: React.FC<{
 
 
 const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ chatHistory, status, adType, selectedIteration, onSelectIteration }) => {
+    const scrollRef = useRef<HTMLDivElement>(null);
+
+    // Auto-scroll to the bottom (which is visually the top in a reversed layout)
+    useLayoutEffect(() => {
+        if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+    }, [chatHistory]);
+
     return (
-        <div className="space-y-6">
-            {chatHistory.map((message, index) => (
+        <div ref={scrollRef} className="flex-grow p-6 overflow-y-auto flex flex-col-reverse gap-6">
+            {(status === 'generating' || status === 'chatting') && chatHistory[chatHistory.length - 1]?.type === 'user' && (
+                <ThinkingIndicator />
+            )}
+            {[...chatHistory].reverse().map((message, index) => (
                 <div key={index}>
                     {message.type === 'user' && (
                         <div className="flex justify-end">
@@ -191,7 +204,6 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ chatHistory, status, ad
                     )}
                 </div>
             ))}
-            {(status === 'generating' || status === 'chatting') && chatHistory[chatHistory.length-1]?.type === 'user' && <ThinkingIndicator />}
         </div>
     );
 };

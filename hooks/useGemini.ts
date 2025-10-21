@@ -1,7 +1,7 @@
 // FIX: Import React to resolve 'Cannot find namespace' errors on React types.
 import React, { useState, useCallback } from 'react';
 import { GoogleGenAI, Modality, Chat } from '@google/genai';
-import type { AdType, AppStatus, ChatMessage, Product, ImageIteration, IterationType, TimeRange, GeneralKnowledgeFile } from '../types';
+import type { AdType, AppStatus, ChatMessage, Product, ImageIteration, IterationType, TimeRange, GeneralKnowledgeFile, TranscriptionData, TranscriptionSegment } from '../types';
 import type { Selection } from '../components/StaticAdInputs';
 
 const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {
@@ -58,8 +58,9 @@ interface GeminiHookProps {
     numberOfIterations: 1 | 2 | 4;
     iterationType: IterationType | null;
     selectedText: string | null;
+    selectedTextTimeRange: TimeRange | null;
     selectedTextTranslation: string | null;
-    transcription: string | null;
+    transcription: TranscriptionData | null;
     detectedLanguage: string | null;
     productList: Product[];
     generalKnowledgeFiles: GeneralKnowledgeFile[];
@@ -71,7 +72,7 @@ interface GeminiHookProps {
 
 export const useGemini = ({
     adFile, adType, marketingAngle, iterationRequest, negativePrompt, selectedProduct, customProductName,
-    selection, referenceAdFile, numberOfIterations, iterationType, selectedText, selectedTextTranslation,
+    selection, referenceAdFile, numberOfIterations, iterationType, selectedText, selectedTextTimeRange, selectedTextTranslation,
     transcription, detectedLanguage,
     productList, generalKnowledgeFiles, knowledgeFileContents,
     setStatus, setError, setChatHistory
@@ -101,58 +102,76 @@ export const useGemini = ({
             
             if (isImageGenRequest) {
                 // ... Image generation logic ...
-                // This section is intentionally left as-is to focus on fixing the reported errors.
-                // A full implementation would go here.
-                // For now, we'll return an error to the user.
                 setError("Image generation is not fully implemented in this version.");
                 setStatus('idle');
                 setChatHistory([]);
                 return;
             }
             
-            // --- Build Knowledge Base Context ---
             let knowledgeContext = '';
-            const generalContent = generalKnowledgeFiles
-                .map(file => knowledgeFileContents.get(file.path))
-                .filter(Boolean)
-                .join('\n\n');
-
+            const generalContent = generalKnowledgeFiles.map(file => knowledgeFileContents.get(file.path)).filter(Boolean).join('\n\n');
             if (generalContent) {
                 knowledgeContext += `--- GENERAL KNOWLEDGE START ---\n${generalContent}\n--- GENERAL KNOWLEDGE END ---\n\n`;
             }
 
             const productData = productList.find(p => p.name === selectedProduct);
-            if (productData && productData.knowledgeFiles) {
-                const productContent = productData.knowledgeFiles
-                    .map(file => knowledgeFileContents.get(file.path))
-                    .filter(Boolean)
-                    .join('\n\n');
+            if (productData?.knowledgeFiles) {
+                const productContent = productData.knowledgeFiles.map(file => knowledgeFileContents.get(file.path)).filter(Boolean).join('\n\n');
                 if (productContent) {
                      knowledgeContext += `--- PRODUCT-SPECIFIC KNOWLEDGE FOR ${productData.name} START ---\n${productContent}\n--- PRODUCT-SPECIFIC KNOWLEDGE FOR ${productData.name} END ---\n\n`;
                 }
             }
 
-
-            // --- Text Generation ---
-            const systemInstruction = `You are an expert performance marketing creative strategist and a multi-lingual video/image analyst. Your goal is to provide actionable, creative ideas for A/B testing ads based on the user's input, creative assets, and provided knowledge base.`;
-            let promptContext = `**Ad Type:** ${adType}\n**Marketing Angle:** ${marketingAngle}`;
-            if (knowledgeContext) {
-                 promptContext += `\n**Knowledge Base Context:**\n${knowledgeContext}`;
-            }
             const creativeParts: any[] = [];
-            let userRequestForPrompt = iterationRequest;
+            let visualContextInstruction = '';
             
-            if (adType === 'video') {
-                // ... Video context building logic ...
-            } else if (adType === 'static') {
-                // ... Static context building logic ...
+            if (adType === 'video' && iterationType === 'copy' && selectedText && selectedTextTimeRange) {
+                const timestamps = [
+                    selectedTextTimeRange.start,
+                    (selectedTextTimeRange.start + selectedTextTimeRange.end) / 2,
+                    selectedTextTimeRange.end
+                ].filter((t, i, arr) => arr.indexOf(t) === i); // Ensure unique timestamps
+                
+                const frames = await extractFramesAsDataUrls(adFile, timestamps);
+                const frameParts = frames.map(dataUrl => ({
+                    inlineData: { mimeType: 'image/jpeg', data: dataUrl.split(',')[1] }
+                }));
+                creativeParts.push(...frameParts);
+                visualContextInstruction = 'Critically, you MUST ensure your suggestions are relevant to the visual context provided by the video frames. The copy should align with what is happening on screen in those frames.';
+            }
+
+            const systemInstruction = `You are an expert performance marketing creative strategist. Your primary task is to iterate on the **"Selected Copy for Iteration"** based on the user's **"Instruction"**.
+- ALWAYS prioritize the **"Selected Copy for Iteration"** as the subject of the work.
+- Use the other context (Ad Type, Marketing Angle, Knowledge Base, Visual Context) to inform your response.
+- Your suggestions must be directly relevant to the selected copy. ${visualContextInstruction}
+- If no specific copy is selected, you will perform the instruction on the creative as a whole.`;
+            
+            let prompt = `**Ad Type:** ${adType}\n**Marketing Angle:** ${marketingAngle}`;
+            if (knowledgeContext) {
+                 prompt += `\n**Knowledge Base Context:**\n${knowledgeContext}`;
+            }
+
+            if (adType === 'video' && iterationType === 'copy' && selectedText) {
+                prompt += `\n\n**Selected Copy for Iteration:**\n> "${selectedText}"`;
+                if (selectedTextTranslation) {
+                    prompt += `\n(English Translation: "${selectedTextTranslation}")`;
+                }
             }
             
-            const finalPrompt = `${promptContext}\n**My Request:** ${userRequestForPrompt}`;
+            const finalUserContent = `Based on the context below, follow my instruction.
+
+--- CONTEXT ---
+${prompt}
+---
+${creativeParts.length > 0 ? '\n--- VISUAL CONTEXT ---\n(Video frames for the selected copy are provided as image inputs)\n---\n' : ''}
+--- INSTRUCTION ---
+${iterationRequest}
+---
+`;
 
             const initialResponse = await ai.models.generateContent({
                 model: 'gemini-2.5-pro',
-                contents: { parts: [...creativeParts, { text: finalPrompt }] },
+                contents: { parts: [...creativeParts, { text: finalUserContent }] },
                 config: { systemInstruction }
             });
             const aiResponseText = initialResponse.text;
@@ -161,7 +180,7 @@ export const useGemini = ({
                 model: 'gemini-2.5-pro',
                 config: { systemInstruction },
                 history: [
-                    { role: 'user', parts: [{ text: finalPrompt }] },
+                    { role: 'user', parts: [{ text: finalUserContent }] },
                     { role: 'model', parts: [{ text: aiResponseText }] }
                 ]
             });
@@ -179,12 +198,11 @@ export const useGemini = ({
         }
     }, [
         adFile, adType, marketingAngle, iterationRequest, negativePrompt, selectedProduct, customProductName,
-        selection, referenceAdFile, numberOfIterations, iterationType, selectedText, selectedTextTranslation,
+        selection, referenceAdFile, numberOfIterations, iterationType, selectedText, selectedTextTimeRange, selectedTextTranslation,
         transcription, detectedLanguage, productList, generalKnowledgeFiles, knowledgeFileContents,
         setStatus, setError, setChatHistory
     ]);
 
-    // FIX: Completed the implementation of handleFollowUpMessage.
     const handleFollowUpMessage = useCallback(async (e: React.FormEvent) => {
         e.preventDefault();
         if (!chatSession || !currentChatMessage.trim()) return;
@@ -205,13 +223,11 @@ export const useGemini = ({
         } catch (err: any) {
             console.error("Follow-up message failed:", err);
             setError(`Failed to get response: ${err.message}`);
-            // Remove the user's message that failed to prevent a broken chat state
             setChatHistory(prev => prev.slice(0, -1)); 
             setStatus('ready');
         }
     }, [chatSession, currentChatMessage, setStatus, setError, setChatHistory, setCurrentChatMessage]);
 
-    // FIX: Added a return statement to the hook to provide state and handlers to the App component.
     return {
         chatSession,
         setChatSession,
@@ -222,7 +238,6 @@ export const useGemini = ({
     };
 };
 
-// FIX: Added static methods to the `useGemini` function object to handle API calls that don't rely on hook state.
 useGemini.verifyApiKey = async (): Promise<{ ok: boolean, message: string }> => {
     try {
         if (!process.env.API_KEY) {
@@ -314,46 +329,78 @@ useGemini.suggestAngle = async (file: File, adType: AdType, setStatus: (status: 
     }
 };
 
-useGemini.transcribeVideo = async (videoFile: File): Promise<string> => {
+const parseTranscriptionWithTimestamps = (rawText: string): TranscriptionData => {
+    const lines = rawText.split('\n');
+    const langMatch = lines[0]?.match(/^LANGUAGE: (.*)/);
+    const language = langMatch?.[1].trim() ?? null;
+
+    const separatorRegex = /---\s*ENGLISH TRANSLATION:/i;
+    const translationSplit = rawText.split(separatorRegex);
+    const originalPart = translationSplit[0];
+    const translation = translationSplit.length > 1 ? translationSplit[1].trim() : null;
+    
+    const segments: TranscriptionSegment[] = [];
+    const fullTextLines: string[] = [];
+    
+    const segmentRegex = /\[(\d+\.?\d*)\s*-\s*(\d+\.?\d*)\]\s*(.*)/;
+    
+    originalPart.split('\n').forEach(line => {
+        const match = line.match(segmentRegex);
+        if (match) {
+            const text = match[3].trim();
+            segments.push({
+                start: parseFloat(match[1]),
+                end: parseFloat(match[2]),
+                text: text
+            });
+            fullTextLines.push(text);
+        }
+    });
+
+    return {
+        language,
+        segments,
+        fullText: fullTextLines.join(' '),
+        translation
+    };
+};
+
+
+useGemini.transcribeVideo = async (videoFile: File): Promise<TranscriptionData> => {
     try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-        
         const base64Video = await fileToBase64(videoFile);
-        
-        const videoPart = {
-            inlineData: {
-                mimeType: videoFile.type,
-                data: base64Video,
-            },
-        };
+        const videoPart = { inlineData: { mimeType: videoFile.type, data: base64Video } };
 
         const prompt = `You are a video transcription and translation service.
 1. Detect the primary spoken language in this video.
-2. Provide a full, word-for-word transcription of the audio in its original language.
-3. If the original language is not English, provide a clean, accurate English translation of the transcription.
+2. Provide a full, word-for-word transcription of the audio in its original language. For each distinct phrase or sentence, you MUST prefix it with its start and end time in seconds, in the format "[START_TIME - END_TIME]".
+3. If the original language is not English, provide a clean, accurate English translation of the transcription AFTER the original transcription.
 
 Format your response EXACTLY as follows:
 
 LANGUAGE: [Detected Language Code, e.g., "es-ES"]
 
-[Full transcription in the original language]
+[0.52 - 2.15] This is the first sentence.
+[2.30 - 4.55] This is the second sentence.
 
 --- ENGLISH TRANSLATION:
 
-[Full English translation of the transcription]
+This is the English translation of the first sentence.
+This is the English translation of the second sentence.
 
-If the language is already English, just provide the LANGUAGE and the transcription, and omit the "--- ENGLISH TRANSLATION:" part entirely.`;
+If the language is already English, just provide the LANGUAGE and the timed transcription, and omit the "--- ENGLISH TRANSLATION:" part entirely.`;
 
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-pro', 
             contents: { parts: [videoPart, { text: prompt }] },
         });
 
-        return response.text;
+        return parseTranscriptionWithTimestamps(response.text);
 
     } catch (e: any) {
         console.error("Video transcription failed:", e);
-        throw new Error(`Transcription failed: ${e.message}. This could be due to file size limits or an unsupported format.`);
+        throw new Error(e.message || "An unknown error occurred during transcription.");
     }
 };
 

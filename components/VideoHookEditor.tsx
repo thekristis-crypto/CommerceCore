@@ -1,43 +1,67 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import Spinner from './Spinner';
+import type { TranscriptionData, TimeRange } from '../types';
 
 interface VideoTextSelectorProps {
     videoUrl: string;
-    transcription: string | null;
+    transcription: TranscriptionData | null;
     isTranscribing: boolean;
     selectedText: string | null;
-    onTextSelect: (text: string | null) => void;
+    onTextSelect: (text: string | null, timeRange: TimeRange | null) => void;
     onBack: () => void;
     translation: string | null;
     isTranslating: boolean;
 }
 
-// Parses the transcription to extract only the original language part before any translation markers.
-const parseTranscription = (transcription: string): string => {
-    const separatorRegex = /---\s*ENGLISH TRANSLATION:/i;
-    const parts = transcription.split(separatorRegex);
-    const originalPart = parts[0] || '';
-    // Remove the LANGUAGE: ... line from the start of the transcription for a clean display.
-    return originalPart.replace(/^LANGUAGE: .*\n\n?/i, '').trim();
-};
+interface Word {
+    text: string;
+    start: number;
+    end: number;
+    wordIndex: number;
+}
 
 const VideoTextSelector: React.FC<VideoTextSelectorProps> = ({ videoUrl, transcription, isTranscribing, selectedText, onTextSelect, onBack, translation, isTranslating }) => {
-    const originalScript = useMemo(() => transcription ? parseTranscription(transcription) : '', [transcription]);
-    // Split the script into words and whitespace to preserve original formatting.
-    const words = useMemo(() => originalScript.split(/(\s+)/), [originalScript]);
+    
+    const words = useMemo((): Word[] => {
+        if (!transcription) return [];
+        let wordIndex = 0;
+        const flattenedWords: Word[] = [];
+        transcription.segments.forEach(segment => {
+            segment.text.split(/(\s+)/).forEach(wordText => {
+                if (wordText.trim() !== '') {
+                    flattenedWords.push({
+                        text: wordText,
+                        start: segment.start,
+                        end: segment.end,
+                        wordIndex: wordIndex++
+                    });
+                } else {
+                    // This is whitespace, give it a non-selectable index
+                    flattenedWords.push({ text: wordText, start: 0, end: 0, wordIndex: -1 });
+                }
+            });
+        });
+        return flattenedWords;
+    }, [transcription]);
 
     const [selection, setSelection] = useState<{ start: number | null, end: number | null }>({ start: null, end: null });
     const [isSelecting, setIsSelecting] = useState(false);
+    
+    // Effect to clear internal selection state if parent clears selectedText
+    useEffect(() => {
+        if (selectedText === null) {
+            setSelection({ start: null, end: null });
+        }
+    }, [selectedText]);
 
     const handleMouseDown = (index: number) => {
-        // Prevent selection on whitespace
-        if (words[index].trim() === '') return;
+        if (index === -1) return; // Don't start selection on whitespace
         setIsSelecting(true);
         setSelection({ start: index, end: index });
     };
 
     const handleMouseEnter = (index: number) => {
-        if (isSelecting) {
+        if (isSelecting && index !== -1) {
             setSelection(prev => ({ ...prev, end: index }));
         }
     };
@@ -46,19 +70,26 @@ const VideoTextSelector: React.FC<VideoTextSelectorProps> = ({ videoUrl, transcr
         if (isSelecting && selection.start !== null && selection.end !== null) {
             const startIndex = Math.min(selection.start, selection.end);
             const endIndex = Math.max(selection.start, selection.end);
-            const selectedWords = words.slice(startIndex, endIndex + 1).join('');
-            onTextSelect(selectedWords.trim());
+            
+            const selectedWords = words.slice(startIndex, endIndex + 1);
+            const finalText = selectedWords.map(w => w.text).join('');
+
+            const firstWord = words[startIndex];
+            const lastWord = words[endIndex];
+            const timeRange: TimeRange = { start: firstWord.start, end: lastWord.end };
+            
+            onTextSelect(finalText.trim(), timeRange);
         }
         setIsSelecting(false);
     }, [isSelecting, selection, words, onTextSelect]);
 
     const clearSelection = () => {
         setSelection({ start: null, end: null });
-        onTextSelect(null);
+        onTextSelect(null, null);
     };
     
     const isWordSelected = (index: number): boolean => {
-        if (selection.start === null || selection.end === null) return false;
+        if (index === -1 || selection.start === null || selection.end === null) return false;
         const startIndex = Math.min(selection.start, selection.end);
         const endIndex = Math.max(selection.start, selection.end);
         return index >= startIndex && index <= endIndex;
@@ -67,23 +98,18 @@ const VideoTextSelector: React.FC<VideoTextSelectorProps> = ({ videoUrl, transcr
     return (
         <div className="space-y-4">
             <video key={videoUrl} src={videoUrl} controls className="w-full rounded-lg shadow-lg" playsInline />
-
             <div className="space-y-2">
                 <div className="flex justify-between items-center">
                     <p className="text-sm text-slate-400">Select the copy by highlighting the text below:</p>
-                     <div>
+                    <div>
                         <button onClick={onBack} className="text-xs text-indigo-400 hover:text-indigo-300 transition mr-4">(Change)</button>
-                        {selectedText && (
-                            <button onClick={clearSelection} className="text-xs text-indigo-400 hover:text-indigo-300 transition">
-                                Clear Selection
-                            </button>
-                        )}
+                        {selectedText && <button onClick={clearSelection} className="text-xs text-indigo-400 hover:text-indigo-300 transition">Clear Selection</button>}
                     </div>
                 </div>
                 <div 
                     className="bg-slate-800/50 p-4 rounded-md cursor-text select-none border border-slate-700 max-h-48 overflow-y-auto"
                     onMouseUp={handleMouseUp}
-                    onMouseLeave={handleMouseUp} // End selection if mouse leaves the area
+                    onMouseLeave={handleMouseUp}
                 >
                     {isTranscribing || !transcription ? (
                         <div className="flex items-center justify-center h-24 text-slate-400">
@@ -94,11 +120,11 @@ const VideoTextSelector: React.FC<VideoTextSelectorProps> = ({ videoUrl, transcr
                             {words.map((word, index) => (
                                 <span 
                                     key={index}
-                                    onMouseDown={() => handleMouseDown(index)}
-                                    onMouseEnter={() => handleMouseEnter(index)}
-                                    className={`${isWordSelected(index) ? 'bg-indigo-500/60 rounded' : ''}`}
+                                    onMouseDown={() => handleMouseDown(word.wordIndex)}
+                                    onMouseEnter={() => handleMouseEnter(word.wordIndex)}
+                                    className={`${isWordSelected(word.wordIndex) ? 'bg-indigo-500/60 rounded' : ''}`}
                                 >
-                                    {word}
+                                    {word.text}
                                 </span>
                             ))}
                         </p>

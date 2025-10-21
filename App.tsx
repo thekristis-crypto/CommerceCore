@@ -1,503 +1,266 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Chat } from '@google/genai';
-import type { AdType, ChatMessage, AppStatus, Product, FilenameAnalysis, GeneralKnowledgeFile, ImageIteration } from './types';
-import type { Selection } from './components/StaticAdInputs';
-import { useAdState } from './hooks/useAdState';
-import { useKnowledgeBase } from './hooks/useKnowledgeBase';
-import { useGemini } from './hooks/useGemini';
-import { compressVideo } from './utils/videoCompressor';
-import { analyzeFile, processFile } from './utils/fileAnalysis';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 
+// Components
 import AdSelector from './components/AdSelector';
 import FileUpload from './components/FileUpload';
-import ReferenceImageUpload from './components/ReferenceImageUpload';
-import VideoTextSelector from './components/VideoHookEditor';
-import VideoTimelineSelector from './components/VideoHookSelector';
+import AnalysisSummary from './components/AnalysisSummary';
+import ProductKnowledgeSummary from './components/ProductKnowledgeSummary';
+import VideoHookSelector from './components/VideoHookSelector';
+import VideoHookEditor from './components/VideoHookEditor';
 import IterationTargetSelector from './components/IterationTargetSelector';
+import StaticAdInputs from './components/StaticAdInputs';
 import ResultsDisplay from './components/ResultsDisplay';
 import Spinner from './components/Spinner';
-import AnalysisSummary from './components/AnalysisSummary';
-import TranscriptionModal from './components/TranscriptionModal';
-import StaticAdEditor from './components/StaticAdInputs';
 import PresetPrompts from './components/PresetPrompts';
+import TranscriptionModal from './components/TranscriptionModal';
 import KnowledgeBaseModal from './components/KnowledgeBaseModal';
-import ProductKnowledgeSummary from './components/ProductKnowledgeSummary';
 import CompressionModal from './components/CompressionModal';
 
-const App: React.FC = () => {
+// Hooks
+import { useAdState } from './hooks/useAdState';
+import { useGemini } from './hooks/useGemini';
+import { useKnowledgeBase } from './hooks/useKnowledgeBase';
+
+// Utils
+import { analyzeFilename } from './utils/fileAnalysis';
+import { compressVideo, cancelCompression } from './utils/videoCompressor';
+import type { ChatMessage, AdType, ImageIteration } from './types';
+
+// Constants
+const MAX_FILE_SIZE_MB = 200;
+const COMPRESSION_TARGET_MB = 100;
+const TRANSCRIPTION_FILE_LIMIT_MB = 50;
+
+function App() {
+    const adState = useAdState();
     const {
         status, setStatus, error, setError,
         adType, setAdType, adFile, setAdFile, filePreview, setFilePreview,
         marketingAngle, setMarketingAngle, iterationRequest, setIterationRequest,
-        negativePrompt, setNegativePrompt, selectedProduct, setSelectedProduct,
-        customProductName, setCustomProductName,
-        analysisResults, setAnalysisResults, analysisAttempted, setAnalysisAttempted,
-        detectedProduct, setDetectedProduct, suggestedAngle, setSuggestedAngle,
+        selectedProduct, setSelectedProduct, customProductName, setCustomProductName,
+        analysisResults, setAnalysisResults, detectedProduct, setDetectedProduct,
         suggestedAngleFromAI, setSuggestedAngleFromAI,
-        fileSizeWarning, setFileSizeWarning,
-        detectedLanguage, setDetectedLanguage, transcription, setTranscription,
-        transcriptionError, setTranscriptionError,
-        showTranscriptionModal, setShowTranscriptionModal, isTranscribing, setIsTranscribing,
-        selection, setSelection, workingAdPreview, setWorkingAdPreview,
-        selectedIteration, setSelectedIteration, referenceAdFile, setReferenceAdFile,
-        referenceFilePreview, setReferenceFilePreview, numberOfIterations, setNumberOfIterations,
+        transcription, setTranscription, isTranscribing, setIsTranscribing, showTranscriptionModal, setShowTranscriptionModal,
+        selection, setSelection, workingAdPreview, setWorkingAdPreview, selectedIteration, setSelectedIteration,
         iterationType, setIterationType, selectedText, setSelectedText,
-        selectedTimeRange, setSelectedTimeRange, selectedTextTranslation, setSelectedTextTranslation,
-        isTranslatingSelection, setIsTranslatingSelection,
+        selectedTimeRange, setSelectedTimeRange, selectedTextTimeRange, setSelectedTextTimeRange,
+        selectedTextTranslation, setSelectedTextTranslation, isTranslatingSelection, setIsTranslatingSelection,
         compressionProgress, setCompressionProgress,
         resetState
-    } = useAdState();
-
-    const {
-        productList,
-        generalKnowledgeFiles,
-        knowledgeFileContents,
-        isParsingKnowledge,
-        showKnowledgeModal,
-        setShowKnowledgeModal,
-        error: knowledgeBaseError,
-    } = useKnowledgeBase();
-
-    const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-    const [productKnowledgeSummary, setProductKnowledgeSummary] = useState<string | null>(null);
-    const [isSummarizingKnowledge, setIsSummarizingKnowledge] = useState(false);
-    const [apiError, setApiError] = useState<string | null>(null);
-    const [isVerifyingApi, setIsVerifyingApi] = useState(true);
-
-    // Verify API Key on load
-    useEffect(() => {
-        const verify = async () => {
-            const result = await useGemini.verifyApiKey();
-            if (!result.ok) {
-                setApiError(result.message);
-            }
-            setIsVerifyingApi(false);
-        };
-        verify();
-    }, []);
-
-    const {
-        chatSession,
-        setChatSession,
-        currentChatMessage,
-        setCurrentChatMessage,
-        handleStartGeneration,
-        handleFollowUpMessage
-    } = useGemini({
-        adFile, adType, marketingAngle, iterationRequest, negativePrompt, selectedProduct, customProductName,
-        selection, referenceAdFile, numberOfIterations, iterationType, selectedText, selectedTextTranslation,
-        transcription, detectedLanguage, productList, generalKnowledgeFiles, knowledgeFileContents,
-        setStatus, setError, setChatHistory
-    });
-
-    const resultsContainerRef = useRef<HTMLDivElement>(null);
+    } = adState;
     
-    // Auto-scroll chat
-    useEffect(() => {
-        if (chatHistory.length > 0) {
-            resultsContainerRef.current?.scrollTo({
-                top: resultsContainerRef.current.scrollHeight,
-                behavior: 'smooth'
-            });
-        }
-    }, [chatHistory]);
-
-    // Translate selected text
-    useEffect(() => {
-        if (!selectedText || (detectedLanguage && detectedLanguage.toLowerCase().startsWith('en'))) {
-            setSelectedTextTranslation(null);
-            return;
-        }
-
-        const controller = new AbortController();
-        const signal = controller.signal;
-
-        useGemini.translateText(selectedText, signal)
-            .then(translation => {
-                if (!signal.aborted) {
-                    setSelectedTextTranslation(translation);
-                }
-            })
-            .catch(err => {
-                if (!signal.aborted) {
-                    console.error("Translation failed:", err);
-                    setSelectedTextTranslation("Could not translate selection.");
-                }
-            })
-            .finally(() => {
-                if (!signal.aborted) {
-                    setIsTranslatingSelection(false);
-                }
-            });
-
-        setIsTranslatingSelection(true);
-
-        return () => controller.abort();
-
-    }, [selectedText, detectedLanguage, setSelectedTextTranslation, setIsTranslatingSelection]);
-
-    // Generate product knowledge summary
-    useEffect(() => {
-        const generateSummary = async () => {
-            if (!selectedProduct || selectedProduct === 'Other' || apiError) {
-                setProductKnowledgeSummary(null);
-                return;
-            }
-
-            const productData = productList.find(p => p.name === selectedProduct);
-            const hasKnowledgeFiles = productData?.knowledgeFiles && productData.knowledgeFiles.length > 0;
-            
-            if (hasKnowledgeFiles && knowledgeFileContents.size > 0) {
-                const relevantContent = productData.knowledgeFiles
-                    .map(file => knowledgeFileContents.get(file.path))
-                    .filter(Boolean)
-                    .join('\n\n');
-
-                if (relevantContent) {
-                    setIsSummarizingKnowledge(true);
-                    setProductKnowledgeSummary(null);
-                    try {
-                        const summary = await useGemini.summarizeProductKnowledge(productData.name, relevantContent);
-                        setProductKnowledgeSummary(summary);
-                    } catch (err) {
-                        console.error("Failed to summarize product knowledge:", err);
-                        setProductKnowledgeSummary(null);
-                    } finally {
-                        setIsSummarizingKnowledge(false);
-                    }
-                } else {
-                    setProductKnowledgeSummary(null);
-                }
-            } else {
-                setProductKnowledgeSummary(null);
-            }
-        };
-
-        generateSummary();
-    }, [selectedProduct, knowledgeFileContents, productList, apiError]);
-
-    const processFileForApp = useCallback(async (file: File) => {
-        resetState(true);
-        setAdFile(file);
-        processFile(file, (url) => {
-            setFilePreview(url);
-            setWorkingAdPreview(url);
-        }, setStatus, setError);
-
-        if (apiError) {
-            setError("Cannot perform AI analysis because the API key is not configured correctly.");
-            return;
-        }
-        
-        setAnalysisAttempted(true);
-        const { analysis, product, angle } = analyzeFile(file, productList);
-        
-        if (analysis) {
-            setAnalysisResults(analysis);
-            if (product) {
-                setSelectedProduct(product.name);
-                setDetectedProduct(product.name);
-            }
-            if (angle) {
-                setMarketingAngle(angle);
-                setSuggestedAngle(angle);
-            } else {
-                useGemini.suggestAngle(file, adType as AdType, setStatus).then(setSuggestedAngleFromAI);
-            }
-        } else {
-            setAnalysisResults(null);
-            useGemini.suggestAngle(file, adType as AdType, setStatus).then(setSuggestedAngleFromAI);
-        }
-
-        if (adType === 'video' && !transcription && !isTranscribing) {
-            setIsTranscribing(true);
-            setError(null);
-            setTranscriptionError(null);
-
-            const MAX_VIDEO_SIZE_BYTES = 15 * 1024 * 1024; // 15MB
-            if (file.size > MAX_VIDEO_SIZE_BYTES) {
-                 setFileSizeWarning(`Warning: This video is >15MB. It may fail to transcribe on the deployed app due to server limits.`);
-            }
-
-            useGemini.transcribeVideo(file).then(text => {
-                setTranscription(text);
-                const langMatch = text.match(/LANGUAGE: (.*)/);
-                if (langMatch && langMatch[1]) {
-                    setDetectedLanguage(langMatch[1]);
-                }
-            }).catch((err: Error) => {
-                console.error("Detailed transcription error:", err);
-                setTranscriptionError(`Transcription failed: ${err.message}. This could be due to file size limits or an unsupported format.`);
-                setTranscription(null);
-            }).finally(() => setIsTranscribing(false));
-        }
-    }, [apiError, adType, isTranscribing, productList, transcription, resetState, setAdFile, setFilePreview, setWorkingAdPreview, setStatus, setError, setAnalysisResults, setAnalysisAttempted, setSelectedProduct, setDetectedProduct, setMarketingAngle, setSuggestedAngle, setSuggestedAngleFromAI, setIsTranscribing, setTranscriptionError, setFileSizeWarning, setTranscription, setDetectedLanguage]);
-
+    const { productList, generalKnowledgeFiles, knowledgeFileContents, isParsingKnowledge, showKnowledgeModal, setShowKnowledgeModal } = useKnowledgeBase();
+    const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+    
+    const geminiHook = useGemini({ ...adState, productList, generalKnowledgeFiles, knowledgeFileContents, setChatHistory });
+    
+    const translationAbortControllerRef = useRef<AbortController | null>(null);
 
     const handleFileChange = async (file: File) => {
-        const COMPRESSION_THRESHOLD = 25 * 1024 * 1024; // 25MB
+        resetState(true);
+        setStatus('analyzing');
+        
+        setAdFile(file);
+        const objectUrl = URL.createObjectURL(file);
+        setFilePreview(objectUrl);
+        setWorkingAdPreview(objectUrl);
 
-        if (adType === 'video' && file.size > COMPRESSION_THRESHOLD) {
-            setStatus('compressing');
-            setCompressionProgress(0);
-            try {
-                const compressedFile = await compressVideo(file, (progress) => {
-                    setCompressionProgress(progress);
-                });
-                await processFileForApp(compressedFile);
-            } catch (err) {
-                console.error("Compression failed:", err);
-                setError(`Failed to compress video: ${(err as Error).message}. Please try a smaller file or a different format.`);
-                resetState(true);
-                setStatus('idle');
+        const analysis = analyzeFilename(file.name);
+        setAnalysisResults(analysis);
+        if (analysis?.productName) {
+            const matchedProduct = productList.find(p => p.name.toLowerCase() === analysis.productName!.toLowerCase());
+            if(matchedProduct) {
+                setSelectedProduct(matchedProduct.name);
+                setDetectedProduct(matchedProduct.name);
             }
-        } else {
-            await processFileForApp(file);
+        }
+        
+        if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+            setStatus('compressing');
+            try {
+                const compressedFile = await compressVideo(file, COMPRESSION_TARGET_MB, setCompressionProgress);
+                setAdFile(compressedFile);
+                 if (adType === 'video' && compressedFile.size <= TRANSCRIPTION_FILE_LIMIT_MB * 1024 * 1024) {
+                    await handleTranscription(compressedFile);
+                }
+            } catch (err: any) {
+                setError(`Video compression failed: ${err.message}. Please try a smaller file.`);
+                setStatus('idle');
+                return;
+            } finally {
+                setCompressionProgress(0);
+            }
+        } else if (adType === 'video' && file.size <= TRANSCRIPTION_FILE_LIMIT_MB * 1024 * 1024) {
+             await handleTranscription(file);
+        }
+        
+        setStatus('idle'); // Temporarily idle while AI suggests an angle
+        const aiAngle = await useGemini.suggestAngle(file, adType as AdType, setStatus);
+        setSuggestedAngleFromAI(aiAngle);
+    };
+    
+    const handleTranscription = async (file: File) => {
+        setIsTranscribing(true);
+        try {
+            const data = await useGemini.transcribeVideo(file);
+            setTranscription(data);
+        } catch (e: any) {
+             setError(`Transcription failed: ${e.message}`);
+        } finally {
+            setIsTranscribing(false);
         }
     };
+    
+     useEffect(() => {
+        if (selectedText && transcription?.language && !/en/i.test(transcription.language)) {
+            setIsTranslatingSelection(true);
+            if (translationAbortControllerRef.current) {
+                translationAbortControllerRef.current.abort();
+            }
+            const controller = new AbortController();
+            translationAbortControllerRef.current = controller;
+            
+            useGemini.translateText(selectedText, controller.signal)
+                .then(translation => setSelectedTextTranslation(translation))
+                .catch(err => { if (err.name !== 'AbortError') console.error("Translation failed:", err); })
+                .finally(() => setIsTranslatingSelection(false));
+        } else {
+             setSelectedTextTranslation(null);
+        }
+        
+        return () => translationAbortControllerRef.current?.abort();
+    }, [selectedText, transcription?.language, setSelectedTextTranslation, setIsTranslatingSelection]);
 
-    const handleReferenceFileChange = (file: File) => {
-        setReferenceAdFile(file);
-        processFile(file, setReferenceFilePreview, setStatus, setError);
+    const handleBackToTypeSelect = () => {
+        resetState(false);
+        setChatHistory([]);
     };
 
     const handleSelectIteration = (iteration: ImageIteration) => {
-        if (iteration.imageDataUrl) {
-            setSelectedIteration(iteration);
-            setWorkingAdPreview(iteration.imageDataUrl);
-            fetch(iteration.imageDataUrl)
-                .then(res => res.blob())
-                .then(blob => {
-                    const newFile = new File([blob], `iteration-${iteration.id}.png`, { type: 'image/png' });
-                    setAdFile(newFile);
-                });
-            setSelection(null);
-        }
+        setSelectedIteration(iteration);
+        setWorkingAdPreview(iteration.imageDataUrl || null);
     };
 
-    const transcriptionButtonContent = () => {
-        if (transcriptionError) {
-            return <span className="text-sm text-center">{transcriptionError}</span>;
+    const isReadyForInput = adType && filePreview;
+    
+    const renderSidebar = () => {
+        if (!isReadyForInput) {
+            return (
+                <div className="flex flex-col items-center justify-center h-full p-4 text-center">
+                    <h3 className="font-semibold text-slate-300">Upload an Ad</h3>
+                    <p className="text-sm text-slate-500">Upload a video or static ad creative to begin the iteration process.</p>
+                </div>
+            );
         }
-        if (isTranscribing) {
-            return <><Spinner /> Transcribing...</>;
-        }
-        if (transcription) {
-            return 'Show Full Transcription';
-        }
-        return 'Transcription Unavailable';
+        
+        return (
+            <div className="p-4 space-y-4 overflow-y-auto">
+                {adType === 'video' && (
+                    <>
+                        {iterationType === null && <IterationTargetSelector onSelect={setIterationType} videoUrl={filePreview!} />}
+                        {iterationType === 'copy' && <VideoHookEditor videoUrl={filePreview!} transcription={transcription} isTranscribing={isTranscribing} selectedText={selectedText} onTextSelect={(text, timeRange) => { setSelectedText(text); setSelectedTextTimeRange(timeRange); }} onBack={() => setIterationType(null)} translation={selectedTextTranslation} isTranslating={isTranslatingSelection} />}
+                        {iterationType === 'visual' && <VideoHookSelector videoUrl={filePreview!} onTimeRangeSelect={setSelectedTimeRange} selectedTimeRange={selectedTimeRange} onBack={() => setIterationType(null)} />}
+                    </>
+                )}
+                {adType === 'static' && <StaticAdInputs imageUrl={workingAdPreview!} onSelectionChange={setSelection} disabled={status === 'generating' || status === 'chatting'} />}
+                <AnalysisSummary analysis={analysisResults} detectedLanguage={transcription?.language ?? null} />
+                
+                <div className="space-y-2">
+                    <label className="block text-sm font-medium text-slate-300">1. Select Product</label>
+                    <select value={selectedProduct} onChange={e => setSelectedProduct(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-md p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+                         <option value="" disabled>-- Select a product --</option>
+                        {productList.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                        <option value="Other">Other...</option>
+                    </select>
+                    {selectedProduct === 'Other' && <input type="text" value={customProductName} onChange={e => setCustomProductName(e.target.value)} placeholder="Enter product name" className="w-full bg-slate-800 border border-slate-600 rounded-md p-2 text-sm mt-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" />}
+                </div>
+
+                <ProductKnowledgeSummary productName={selectedProduct} summary={null} isLoading={false} />
+                
+                <div className="space-y-2">
+                     <label className="block text-sm font-medium text-slate-300">2. Define Marketing Angle</label>
+                     <input type="text" value={marketingAngle} onChange={e => setMarketingAngle(e.target.value)} placeholder="e.g., Problem/Solution, Scarcity" className="w-full bg-slate-800 border border-slate-600 rounded-md p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" />
+                     {suggestedAngleFromAI && <button onClick={() => setMarketingAngle(suggestedAngleFromAI)} className="text-xs text-indigo-400 hover:underline mt-1">Use suggestion: "{suggestedAngleFromAI}"</button>}
+                </div>
+                 <div className="space-y-2">
+                     <label className="block text-sm font-medium text-slate-300">3. Write Your Iteration Request</label>
+                     <textarea value={iterationRequest} onChange={e => setIterationRequest(e.target.value)} rows={4} placeholder="e.g., Generate 5 alternative hooks..." className="w-full bg-slate-800 border border-slate-600 rounded-md p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"></textarea>
+                </div>
+                <PresetPrompts adType={adType} hasSelection={!!selection} onSelect={setIterationRequest} iterationType={iterationType} />
+            </div>
+        );
     };
 
-    const transcriptionButtonClasses = () => {
-        let base = "w-full text-center py-2 px-4 rounded-md transition-colors flex items-center justify-center gap-2";
-        if (transcriptionError) {
-            return `${base} bg-red-900/50 text-red-300 cursor-default`;
-        }
-        if (isTranscribing || !transcription) {
-            return `${base} bg-cyan-600/20 text-cyan-300 disabled:opacity-50 disabled:cursor-not-allowed`;
-        }
-        return `${base} bg-cyan-600/20 text-cyan-300 hover:bg-cyan-600/40`;
-    };
+    if (!adType) {
+        return (
+            <main className="flex items-center justify-center min-h-screen bg-slate-900 text-slate-200">
+                <AdSelector onSelect={setAdType} onOpenKnowledgeBase={() => setShowKnowledgeModal(true)} />
+                <KnowledgeBaseModal isOpen={showKnowledgeModal} onClose={() => setShowKnowledgeModal(false)} generalFiles={generalKnowledgeFiles} productList={productList} isLoading={isParsingKnowledge} knowledgeFileContents={knowledgeFileContents} />
+            </main>
+        );
+    }
+    
+    const canGenerate = selectedProduct && marketingAngle && iterationRequest;
 
-    const mainContent = (
-        <>
-            <header className="w-full max-w-screen-2xl text-center py-6">
-                <h1 className="text-3xl font-bold">AI Ad Iteration Studio</h1>
-                <p className="text-slate-400 mt-2">Upload your creative, define your goal, and instantly generate A/B test ideas.</p>
+    return (
+        <div className="h-screen w-screen bg-slate-950 text-slate-300 flex flex-col">
+            {status === 'compressing' && <CompressionModal progress={compressionProgress} onCancel={cancelCompression} />}
+            {transcription && <TranscriptionModal isOpen={showTranscriptionModal} onClose={() => setShowTranscriptionModal(false)} transcriptionData={transcription} />}
+            <KnowledgeBaseModal isOpen={showKnowledgeModal} onClose={() => setShowKnowledgeModal(false)} generalFiles={generalKnowledgeFiles} productList={productList} isLoading={isParsingKnowledge} knowledgeFileContents={knowledgeFileContents} />
+            
+            <header className="flex-shrink-0 flex items-center justify-between p-3 border-b border-slate-800 bg-slate-900/50 backdrop-blur-sm">
+                <div className="flex items-center gap-4">
+                    <button onClick={handleBackToTypeSelect} className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors">
+                        &larr; Back
+                    </button>
+                    <h1 className="text-lg font-bold text-white">Ad Iteration Studio <span className="text-xs font-semibold bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full capitalize">{adType} Ad</span></h1>
+                </div>
+                {isReadyForInput && (
+                     <div className="flex items-center gap-2">
+                        {adType === 'video' && transcription && <button onClick={() => setShowTranscriptionModal(true)} className="text-xs bg-slate-700/50 hover:bg-slate-700 py-1 px-3 rounded-md transition-colors">View Transcription</button>}
+                        <button onClick={geminiHook.handleStartGeneration} disabled={!canGenerate || status === 'generating' || status === 'chatting'} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                            {(status === 'generating' || status === 'chatting') && <Spinner />}
+                            Generate
+                        </button>
+                    </div>
+                )}
             </header>
-            <div className="w-full max-w-screen-2xl flex-grow flex gap-8 px-4 pb-8">
-                <aside className="w-[450px] flex-shrink-0 bg-slate-900 border border-slate-800 rounded-lg flex flex-col">
-                    <div className="flex justify-between items-center p-4 border-b border-slate-800 flex-shrink-0">
-                        <h2 className="text-lg font-bold">Controls</h2>
-                        <button onClick={() => resetState()} className="text-sm bg-slate-700/50 hover:bg-slate-700 px-3 py-1 rounded-md transition-colors">
-                            New Project
-                        </button>
-                    </div>
-
-                    <div className="flex-grow p-4 space-y-6 overflow-y-auto">
-                        <section className="space-y-4">
-                            <h3 className="font-semibold text-lg">1. Your Creative</h3>
-                            {filePreview ? (
-                                <div className="space-y-4">
-                                    {adType === 'static' && workingAdPreview && (
-                                        <StaticAdEditor imageUrl={workingAdPreview} onSelectionChange={setSelection} disabled={status === 'generating' || !!apiError} />
-                                    )}
-                                    {adType === 'video' && !iterationType && (
-                                        <IterationTargetSelector onSelect={setIterationType} videoUrl={filePreview} />
-                                    )}
-                                    {adType === 'video' && iterationType === 'copy' && (
-                                        <VideoTextSelector videoUrl={filePreview} transcription={transcription} isTranscribing={isTranscribing} selectedText={selectedText} onTextSelect={setSelectedText} onBack={() => { setIterationType(null); setSelectedText(null); setSelectedTextTranslation(null); }} translation={selectedTextTranslation} isTranslating={isTranslatingSelection} />
-                                    )}
-                                    {adType === 'video' && iterationType === 'visual' && (
-                                        <VideoTimelineSelector videoUrl={filePreview} selectedTimeRange={selectedTimeRange} onTimeRangeSelect={setSelectedTimeRange} onBack={() => { setIterationType(null); setSelectedTimeRange(null); }} />
-                                    )}
-                                    <button onClick={() => { setAdFile(null); setFilePreview(null); resetState(true); }} className="w-full text-xs py-1 px-3 rounded-md bg-slate-700/50 hover:bg-slate-700">Change Creative</button>
-                                    
-                                    {analysisAttempted && <AnalysisSummary analysis={analysisResults} detectedLanguage={detectedLanguage} />}
-
-                                    {fileSizeWarning && (
-                                        <div className="p-3 bg-yellow-900/50 border border-yellow-700 text-yellow-300 text-sm rounded-md">
-                                            {fileSizeWarning}
-                                        </div>
-                                    )}
-
-                                    { adType === 'video' && adFile && (
-                                        <button 
-                                            onClick={() => setShowTranscriptionModal(true)} 
-                                            disabled={isTranscribing || !transcription || !!transcriptionError || !!apiError} 
-                                            className={transcriptionButtonClasses()}
-                                        >
-                                            {transcriptionButtonContent()}
-                                        </button>
-                                    )}
-                                </div>
-                            ) : (
-                                <FileUpload onFileChange={handleFileChange} adType={adType as AdType} disabled={status === 'compressing' || !!apiError} />
-                            )}
-                        </section>
-                        
-                        {adFile && (
-                            <>
-                                <section className="space-y-4">
-                                    <h3 className="font-semibold text-lg">2. Your Goal</h3>
-                                     <div>
-                                        <label htmlFor="product" className="block text-sm font-medium text-slate-300 mb-1">Product</label>
-                                        <select id="product" value={selectedProduct} onChange={e => setSelectedProduct(e.target.value)} disabled={!!apiError} className="w-full bg-slate-800 border border-slate-600 rounded-md p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition disabled:opacity-50">
-                                            <option value="">{detectedProduct ? `Detected: ${detectedProduct}`: `Select a product...`}</option>
-                                            {productList.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
-                                            <option value="Other">Other...</option>
-                                        </select>
-                                    </div>
-                                    {selectedProduct === 'Other' && (
-                                        <input type="text" value={customProductName} onChange={e => setCustomProductName(e.target.value)} disabled={!!apiError} className="w-full bg-slate-800 border border-slate-600 rounded-md p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition disabled:opacity-50" placeholder="Enter Custom Product Name" />
-                                    )}
-                                    <ProductKnowledgeSummary
-                                        productName={selectedProduct}
-                                        summary={productKnowledgeSummary}
-                                        isLoading={isSummarizingKnowledge}
-                                    />
-                                    <div>
-                                        <label htmlFor="angle" className="block text-sm font-medium text-slate-300 mb-1">Marketing Angle</label>
-                                        <div className="relative">
-                                            <input type="text" id="angle" value={marketingAngle} onChange={e => setMarketingAngle(e.target.value)} disabled={!!apiError} className="w-full bg-slate-800 border border-slate-600 rounded-md p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition disabled:opacity-50" placeholder={suggestedAngle ? `e.g., ${suggestedAngle}`: "e.g., Problem/Solution, UGC"} />
-                                            {suggestedAngleFromAI && marketingAngle !== suggestedAngleFromAI && (
-                                                <button onClick={() => setMarketingAngle(suggestedAngleFromAI)} className="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-indigo-600/50 hover:bg-indigo-600 px-2 py-1 rounded">
-                                                    Use: {suggestedAngleFromAI}
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                     <div>
-                                        <label htmlFor="negativePrompt" className="block text-sm font-medium text-slate-300 mb-1">Things to Avoid (Optional)</label>
-                                        <input type="text" id="negativePrompt" value={negativePrompt} onChange={e => setNegativePrompt(e.target.value)} disabled={!!apiError} className="w-full bg-slate-800 border border-slate-600 rounded-md p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition disabled:opacity-50" placeholder="e.g., no red colors, don't use stock photos" />
-                                    </div>
-                                    {adType === 'static' && (
-                                        <div className="space-y-4 pt-2">
-                                            <ReferenceImageUpload onFileChange={handleReferenceFileChange} onClear={() => { setReferenceAdFile(null); setReferenceFilePreview(null); }} previewUrl={referenceFilePreview} disabled={status === 'generating' || !!apiError} />
-                                            <div>
-                                                <label htmlFor="numIterations" className="block text-sm font-medium text-slate-300 mb-1">Number of Variations</label>
-                                                 <select id="numIterations" value={numberOfIterations} onChange={e => setNumberOfIterations(Number(e.target.value) as 1 | 2 | 4)} disabled={!!apiError} className="w-full bg-slate-800 border border-slate-600 rounded-md p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition disabled:opacity-50">
-                                                    <option value="1">1 Variation</option>
-                                                    <option value="2">2 Variations</option>
-                                                    <option value="4">4 Variations</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                    )}
-                                    <div>
-                                        <label htmlFor="iterationRequest" className="block text-sm font-medium text-slate-300 mb-1">Iteration Request</label>
-                                        <textarea id="iterationRequest" value={iterationRequest} onChange={(e) => setIterationRequest(e.target.value)} placeholder='e.g., "Generate 5 alternative hooks for this copy"' className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition resize-none disabled:opacity-50" rows={4} disabled={status === 'generating' || !!apiError} />
-                                    </div>
-                                    <PresetPrompts adType={adType} hasSelection={!!selection} onSelect={(prompt) => setIterationRequest(prompt)} iterationType={iterationType} />
-                                </section>
-                            </>
-                        )}
-                    </div>
-                    
-                    <div className="p-4 border-t border-slate-800 flex-shrink-0">
-                        <button onClick={() => handleStartGeneration()} disabled={!adFile || !selectedProduct || !marketingAngle || !iterationRequest || status === 'generating' || !!apiError} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition-colors disabled:bg-slate-600 disabled:cursor-not-allowed flex items-center justify-center">
-                            {status === 'generating' ? <Spinner /> : 'Generate'}
-                        </button>
-                    </div>
+            
+            <div className="flex flex-grow overflow-hidden">
+                <aside className="w-[450px] flex-shrink-0 bg-slate-900/70 border-r border-slate-800 flex flex-col">
+                    {!isReadyForInput && <div className="p-4"><FileUpload onFileChange={handleFileChange} adType={adType} disabled={status !== 'idle'}/></div>}
+                    {renderSidebar()}
                 </aside>
 
-                <section className="flex-grow bg-slate-900 border border-slate-800 rounded-lg flex flex-col">
-                     {error && <div className="m-4 bg-red-900/50 border border-red-700 text-red-300 p-4 rounded-lg flex-shrink-0">{error}</div>}
-                    
-                    {chatHistory.length === 0 ? (
-                        <div className="flex-grow flex flex-col items-center justify-center text-center text-slate-500 p-8">
-                             <svg className="w-16 h-16 mb-4 text-slate-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 01-6.23-.693L4.2 15.3m15.6 0c1.626.408 3.11 1.465 3.976 2.88A9.065 9.065 0 0112 21a9.065 9.065 0 01-7.775-4.144c.866-1.415 2.35-2.472 3.976-2.88" />
-                            </svg>
-                            <h3 className="text-xl font-semibold mt-4 text-slate-400">Your results will appear here</h3>
-                            <p className="max-w-xs mt-2">Upload an ad and define your goal in the sidebar to get started.</p>
-                        </div>
-                    ) : (
-                        <div ref={resultsContainerRef} className="flex-grow p-6 overflow-y-auto">
-                            <ResultsDisplay chatHistory={chatHistory} status={status} adType={adType} selectedIteration={selectedIteration} onSelectIteration={handleSelectIteration} />
+                <main className="flex-grow flex flex-col bg-slate-950/50">
+                    {chatHistory.length === 0 && status !== 'generating' && (
+                        <div className="flex-grow flex items-center justify-center text-center text-slate-600">
+                           <p>Your creative iterations will appear here.</p>
                         </div>
                     )}
-                    
-                    {chatHistory.length > 0 && chatSession && (
-                        <div className="p-4 border-t border-slate-800 flex-shrink-0">
-                            <form onSubmit={(e) => handleFollowUpMessage(e)} className="flex items-center gap-3">
-                                <input type="text" value={currentChatMessage} onChange={(e) => setCurrentChatMessage(e.target.value)} placeholder="Ask a follow-up question to refine the ideas..." className="w-full bg-slate-800 border border-slate-600 rounded-lg py-2 px-4 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition disabled:opacity-50" disabled={status === 'generating' || !!apiError} aria-label="Chat input" />
-                                <button type="submit" disabled={status === 'generating' || !currentChatMessage.trim() || !!apiError} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold p-2.5 rounded-lg transition-colors disabled:bg-slate-600 disabled:cursor-not-allowed flex-shrink-0" aria-label="Send message">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.428A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" /></svg>
+                    <ResultsDisplay chatHistory={chatHistory} status={status} adType={adType} selectedIteration={selectedIteration} onSelectIteration={handleSelectIteration} />
+                     {chatHistory.length > 0 && (status === 'ready' || status === 'chatting') && (
+                        <div className="flex-shrink-0 p-4 border-t border-slate-800 bg-slate-900/50">
+                            <form onSubmit={geminiHook.handleFollowUpMessage} className="flex gap-3">
+                                <input
+                                    type="text"
+                                    value={geminiHook.currentChatMessage}
+                                    onChange={e => geminiHook.setCurrentChatMessage(e.target.value)}
+                                    placeholder="Ask a follow-up question..."
+                                    className="w-full bg-slate-800 border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                                    disabled={status === 'chatting'}
+                                />
+                                <button type="submit" disabled={status === 'chatting' || !geminiHook.currentChatMessage.trim()} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                                    {status === 'chatting' && <Spinner />}
+                                    Send
                                 </button>
                             </form>
                         </div>
                     )}
-                </section>
+                </main>
             </div>
-        </>
-    );
-
-    if (isVerifyingApi) {
-         return (
-             <div className="bg-slate-950 text-slate-200 font-sans min-h-screen flex flex-col items-center justify-center p-4">
-                 <Spinner />
-                 <p className="mt-4 text-slate-400">Verifying API Connection...</p>
-             </div>
-        )
-    }
-
-    if (!adType) {
-        return (
-             <div className="bg-slate-950 text-slate-200 font-sans min-h-screen flex flex-col items-center justify-center p-4">
-                {apiError && <div className="absolute top-0 left-0 right-0 p-4 bg-red-900/80 border-b border-red-700 text-red-200 text-center text-sm font-semibold backdrop-blur-sm">{apiError}</div>}
-                <header className="w-full max-w-screen-2xl text-center py-6 mb-8">
-                    <h1 className="text-3xl font-bold">AI Ad Iteration Studio</h1>
-                    <p className="text-slate-400 mt-2">Upload your creative, define your goal, and instantly generate A/B test ideas.</p>
-                </header>
-                <AdSelector onSelect={type => { resetState(); setAdType(type); }} onOpenKnowledgeBase={() => setShowKnowledgeModal(true)} />
-                {knowledgeBaseError && <p className="mt-4 text-red-400 max-w-md text-center text-sm">{knowledgeBaseError}</p>}
-                <KnowledgeBaseModal
-                    isOpen={showKnowledgeModal}
-                    onClose={() => setShowKnowledgeModal(false)}
-                    generalFiles={generalKnowledgeFiles}
-                    productList={productList}
-                    isLoading={isParsingKnowledge}
-                    knowledgeFileContents={knowledgeFileContents}
-                />
-             </div>
-        )
-    }
-
-    return (
-        <div className="bg-slate-950 text-slate-200 font-sans min-h-screen flex flex-col items-center">
-            {apiError && <div className="sticky top-0 left-0 right-0 p-4 bg-red-900/80 border-b border-red-700 text-red-200 text-center text-sm font-semibold z-50 backdrop-blur-sm">{apiError}</div>}
-            {status === 'compressing' && <CompressionModal progress={compressionProgress} />}
-            {mainContent}
-            <footer className="w-full text-center p-4 text-xs text-slate-600">
-                Powered by Google Gemini
-            </footer>
-             {showTranscriptionModal && transcription && (
-                <TranscriptionModal isOpen={showTranscriptionModal} onClose={() => setShowTranscriptionModal(false)} transcription={transcription} detectedLanguage={detectedLanguage} />
-            )}
-             <KnowledgeBaseModal isOpen={showKnowledgeModal} onClose={() => setShowKnowledgeModal(false)} generalFiles={generalKnowledgeFiles} productList={productList} isLoading={isParsingKnowledge} knowledgeFileContents={knowledgeFileContents} />
         </div>
     );
-};
+}
 
 export default App;

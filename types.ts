@@ -1,6 +1,6 @@
-export type AdType = 'video' | 'static';
+import type { Selection } from './components/StaticAdInputs';
 
-// Fix: Added 'parsing' to AppStatus to match its usage in App.tsx and prevent type errors.
+export type AdType = 'video' | 'static';
 export type AppStatus = 'initializing' | 'idle' | 'compressing' | 'analyzing' | 'ready' | 'generating' | 'chatting' | 'summarizing' | 'parsing';
 
 export interface Product {
@@ -26,15 +26,11 @@ export interface KnowledgeBase {
     generalKnowledge?: GeneralKnowledgeFile[];
 }
 
-
-// --- New types for image iterations ---
 export interface ImageIteration {
     id: string;
-    imageDataUrl?: string; // The full composite image with the iteration applied
+    imageDataUrl?: string;
     status: 'loading' | 'done' | 'failed';
 }
-
-// --- Chat-based History Types ---
 
 export interface UserMessage {
     type: 'user';
@@ -43,13 +39,10 @@ export interface UserMessage {
 
 export interface AssistantMessage {
     type: 'assistant';
-    content: string | ImageIteration[]; // Can be text or a set of image iterations
+    content: string | ImageIteration[];
 }
 
 export type ChatMessage = UserMessage | AssistantMessage;
-
-
-// --- Analysis Types ---
 
 export interface FilenameAnalysis {
     productName?: string;
@@ -66,11 +59,22 @@ export interface FilenameAnalysis {
 
 export type AnalysisSource = 'filename' | 'content' | null;
 
-// --- Video Iteration Control Types ---
-
 export type IterationType = 'copy' | 'visual';
 
 export interface TimeRange {
     start: number;
     end: number;
+}
+
+export interface TranscriptionSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface TranscriptionData {
+  language: string | null;
+  fullText: string;
+  translation: string | null;
+  segments: TranscriptionSegment[];
 }
